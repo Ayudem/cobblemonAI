@@ -152,6 +152,10 @@ public class Trainer extends JsonFile {
         return team.size();
     }
 
+    public void clearTeam() {
+         team.clear();
+    }
+
     public TrainerPokemon getTeamSlot(int index) {
         return team.get(index);
     }

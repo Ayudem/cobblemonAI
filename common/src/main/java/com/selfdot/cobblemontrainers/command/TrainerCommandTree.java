@@ -199,6 +199,18 @@ public class TrainerCommandTree {
                 )
             )
             .then(LiteralArgumentBuilder.<ServerCommandSource>
+                            literal("pokepaste")
+                    .requires(editCommandRequirement)
+                    .then(RequiredArgumentBuilder.<ServerCommandSource, String>
+                                    argument("trainer", string())
+                            .suggests(new TrainerNameSuggestionProvider())
+                            .then(RequiredArgumentBuilder.<ServerCommandSource, String>
+                                            argument("url", string())
+                                    .executes(new SetPokepasteTeam())
+                            )
+                    )
+            )
+            .then(LiteralArgumentBuilder.<ServerCommandSource>
                 literal("setcooldownseconds")
                 .requires(editCommandRequirement)
                 .then(RequiredArgumentBuilder.<ServerCommandSource, String>

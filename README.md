@@ -48,3 +48,10 @@ All commands require permission level 2 or their corresponding permission nodes:
 Graphics by twsparklecat
 
 [![image](https://media.forgecdn.net/attachments/description/959503/description_ec38fa43-4312-4aea-b11d-849dbdd062b1.png)](https://discord.gg/y8K2HYDBuX)
+
+## Development Notes
+
+Need Java 17
+Can test client by running configuration Minecraft client (fabric)
+Can test server by running configuration Minecraft server (fabric)
+Build CobblemonTrainers (edit and run common:build so it builds hopefully correct .jar files)
