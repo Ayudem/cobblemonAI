@@ -18,6 +18,7 @@ public class DataKeys {
 
     public static final String TRAINER_NAME = "name";
     public static final String TRAINER_TEAM = "team";
+    public static final String TRAINER_END_COMMAND = "endCommand";
     public static final String TRAINER_WIN_COMMAND = "winCommand";
     public static final String TRAINER_LOSS_COMMAND = "lossCommand";
     public static final String TRAINER_CAN_ONLY_BEAT_ONCE = "canOnlyBeatOnce";

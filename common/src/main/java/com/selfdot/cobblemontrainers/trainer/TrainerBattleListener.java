@@ -21,7 +21,7 @@ public class TrainerBattleListener {
     public static TrainerBattleListener getInstance() { return INSTANCE; }
     private MinecraftServer server;
     private final Map<PokemonBattle, Trainer> onBattleVictory = new HashMap<>();
-    private final Map<PokemonBattle, String> onBattleLoss = new HashMap<>();
+    private final Map<PokemonBattle, Trainer> onBattleLoss = new HashMap<>();
 
     private static void runCommand(String command, ServerPlayerEntity player) {
         // Because Mohist doesn't allow executing commands as console, this option is needed.
@@ -41,14 +41,25 @@ public class TrainerBattleListener {
                     CobblemonTrainers.INSTANCE.getTrainerWinTracker().add(trainer, uuid);
                     ServerPlayerEntity player = server.getPlayerManager().getPlayer(uuid);
                     if (player == null) return;
+
+                    String endCommand = trainer.getEndCommand();
+                    if (endCommand != null && !endCommand.isEmpty()) runCommand(endCommand, player);
+
                     String winCommand = trainer.getWinCommand();
                     if (winCommand != null && !winCommand.isEmpty()) runCommand(winCommand, player);
                 }));
             }
             if (onBattleLoss.containsKey(battle)) {
+                Trainer trainer = onBattleLoss.get(battle);
                 battleVictoryEvent.getLosers().forEach(battleActor -> battleActor.getPlayerUUIDs().forEach(uuid -> {
                     ServerPlayerEntity player = server.getPlayerManager().getPlayer(uuid);
-                    if (player != null) runCommand(onBattleLoss.get(battle), player);
+                    if (player == null) return;
+
+                    String endCommand = trainer.getEndCommand();
+                    if (endCommand != null && !endCommand.isEmpty()) runCommand(endCommand, player);
+
+                    String lossCommand = trainer.getLossCommand();
+                    if (lossCommand != null && !lossCommand.isEmpty()) runCommand(lossCommand, player);
                 }));
                 onBattleLoss.remove(battle);
             }
@@ -60,9 +71,7 @@ public class TrainerBattleListener {
         onBattleVictory.put(battle, trainer);
     }
 
-    public void addOnBattleLoss(PokemonBattle battle, String lossCommand) {
-        if (lossCommand != null && !lossCommand.isEmpty()) onBattleLoss.put(battle, lossCommand);
-    }
+    public void addOnBattleLoss(PokemonBattle battle, Trainer trainer) { onBattleLoss.put(battle, trainer); }
 
     public void setServer(MinecraftServer server) {
         this.server = server;

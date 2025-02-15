@@ -126,7 +126,7 @@ public class PokemonUtility {
             .ifSuccessful(battle -> {
                 CobblemonTrainers.INSTANCE.getTrainerCooldownTracker().onBattleStart(player, trainer);
                 TrainerBattleListener.getInstance().addOnBattleVictory(battle, trainer);
-                TrainerBattleListener.getInstance().addOnBattleLoss(battle, trainer.getLossCommand());
+                TrainerBattleListener.getInstance().addOnBattleLoss(battle, trainer);
                 IN_TRAINER_BATTLE.add(player.getUuid());
                 return Unit.INSTANCE;
             });

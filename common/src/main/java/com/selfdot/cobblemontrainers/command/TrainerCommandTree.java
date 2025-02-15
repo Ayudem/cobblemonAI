@@ -137,6 +137,18 @@ public class TrainerCommandTree {
                 )
             )
             .then(LiteralArgumentBuilder.<ServerCommandSource>
+                            literal("setendcommand")
+                    .requires(editCommandRequirement)
+                    .then(RequiredArgumentBuilder.<ServerCommandSource, String>
+                                    argument("trainer", string())
+                            .suggests(new TrainerNameSuggestionProvider())
+                            .then(RequiredArgumentBuilder.<ServerCommandSource, String>
+                                            argument("endCommand", string())
+                                    .executes(new SetEndCommandCommand())
+                            )
+                    )
+            )
+            .then(LiteralArgumentBuilder.<ServerCommandSource>
                 literal("setwincommand")
                 .requires(editCommandRequirement)
                 .then(RequiredArgumentBuilder.<ServerCommandSource, String>

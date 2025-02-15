@@ -25,6 +25,7 @@ public class Trainer extends JsonFile {
     private String group;
     private List<TrainerPokemon> team;
     private String winCommand;
+    private String endCommand;
     private String lossCommand;
     private boolean canOnlyBeatOnce;
     private long cooldownSeconds;
@@ -82,8 +83,17 @@ public class Trainer extends JsonFile {
         return winCommand;
     }
 
+    public String getEndCommand() {
+        return endCommand;
+    }
+
     public void setWinCommand(String winCommand) {
         this.winCommand = winCommand;
+        save();
+    }
+
+    public void setEndCommand(String endCommand) {
+        this.endCommand = endCommand;
         save();
     }
 
@@ -179,6 +189,7 @@ public class Trainer extends JsonFile {
     protected void setDefaults() {
         team = new ArrayList<>();
         winCommand = "";
+        endCommand = "";
         lossCommand = "";
         canOnlyBeatOnce = false;
         cooldownSeconds = 0;
@@ -199,6 +210,9 @@ public class Trainer extends JsonFile {
         winCommand = jsonObject.has(TRAINER_WIN_COMMAND) ?
             jsonObject.get(TRAINER_WIN_COMMAND).getAsString() : "";
 
+        if (jsonObject.has(TRAINER_END_COMMAND)) {
+            endCommand = jsonObject.get(TRAINER_END_COMMAND).getAsString();
+        }
         if (jsonObject.has(TRAINER_GROUP)) {
             group = jsonObject.get(TRAINER_GROUP).getAsString();
         }
@@ -228,6 +242,7 @@ public class Trainer extends JsonFile {
         JsonObject jsonObject = new JsonObject();
         jsonObject.add(TRAINER_TEAM, teamArray);
         jsonObject.addProperty(TRAINER_WIN_COMMAND, winCommand);
+        jsonObject.addProperty(TRAINER_END_COMMAND, endCommand);
         jsonObject.addProperty(TRAINER_LOSS_COMMAND, lossCommand);
         jsonObject.addProperty(TRAINER_CAN_ONLY_BEAT_ONCE, canOnlyBeatOnce);
         jsonObject.addProperty(TRAINER_COOLDOWN_SECONDS, cooldownSeconds);
