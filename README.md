@@ -54,4 +54,4 @@ Graphics by twsparklecat
 Need Java 17
 Can test client by running configuration Minecraft client (fabric)
 Can test server by running configuration Minecraft server (fabric)
-Build CobblemonTrainers (edit and run common:build so it builds hopefully correct .jar files)
+Build CobblemonTrainers (edit and run farbric:build so it builds hopefully correct .jar files)
