@@ -4,6 +4,7 @@
   "package": "com.selfdot.cobblemontrainers.mixin",
   "compatibilityLevel": "JAVA_17",
   "mixins": [
+    "DropTableMixin",
     "PlayerBattleActorMixin",
     "PokemonBattleMixin",
     "PokemonEntityMixin",
