@@ -131,7 +131,11 @@ class PokePasteParser {
                 }
                 current.setAbility$common(abilityTemplate.create(true));
             } else if (line.startsWith("- ")) {
-                String moveName = line.replaceFirst("- ", "").toLowerCase().replaceAll(" ", "");
+                String moveName = line
+                        .replaceFirst("- ", "")
+                        .toLowerCase()
+                        .replaceAll(" ", "")
+                        .replaceAll("-", "");
                 MoveTemplate moveTemplate = Moves.INSTANCE.getByName(moveName);
                 if (moveTemplate == null) {
                     throw new RuntimeException("Unknown Move: " + moveName);

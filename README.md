@@ -13,6 +13,8 @@ These trainers feature a custom AI inspired by Generation 5's trainer AI, ensuri
 
 - **/trainers add \<name\> [\<group\>]**: Establish a new trainer with an empty team, optionally assigning them to a specific group.
 - **/trainers setup**: Access the GUI to configure trainers' teams.
+- **/trainers pokepaste \<trainer\> "\<url\>"**: Load the pokepaste from url and apply it to trainer's team.
+- **/trainers setendcommand \<trainer\> \<command\>**: Specify the command executed at the end of battle (regardless if win or lose).
 - **/trainers setwincommand \<trainer\> \<command\>**: Specify the command executed upon defeating a trainer, with automatic player name substitution (%player%).
 - **/trainers setlosscommand \<trainer\> \<command\>**: Define the command executed when a player is defeated by a trainer, with automatic player name substitution (%player%).
 - **/trainers setgroup \<trainer\> \<group\>**: Group trainers under specified names in the setup GUI for organizational purposes.
