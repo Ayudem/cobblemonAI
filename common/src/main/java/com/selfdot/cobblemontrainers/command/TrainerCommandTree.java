@@ -4,6 +4,7 @@ import com.cobblemon.mod.common.api.pokemon.PokemonProperties;
 import com.cobblemon.mod.common.command.argument.PartySlotArgumentType;
 import com.cobblemon.mod.common.command.argument.PokemonPropertiesArgumentType;
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.BoolArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
@@ -210,15 +211,15 @@ public class TrainerCommandTree {
                     )
                 )
             )
-            .then(LiteralArgumentBuilder.<ServerCommandSource>
-                            literal("pokepaste")
+            .then(LiteralArgumentBuilder.<ServerCommandSource>literal("pokepaste")
                     .requires(editCommandRequirement)
-                    .then(RequiredArgumentBuilder.<ServerCommandSource, String>
-                                    argument("trainer", string())
+                    .then(RequiredArgumentBuilder.<ServerCommandSource, String>argument("trainer", string())
                             .suggests(new TrainerNameSuggestionProvider())
-                            .then(RequiredArgumentBuilder.<ServerCommandSource, String>
-                                            argument("url", string())
+                            .then(RequiredArgumentBuilder.<ServerCommandSource, String>argument("url", string())
                                     .executes(new SetPokepasteTeam())
+                                    .then(RequiredArgumentBuilder.<ServerCommandSource, Boolean>argument("ignoreErrors", BoolArgumentType.bool())
+                                            .executes(new SetPokepasteTeam())
+                                    )
                             )
                     )
             )
