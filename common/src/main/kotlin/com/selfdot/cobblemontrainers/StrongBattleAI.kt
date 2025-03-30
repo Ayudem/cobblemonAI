@@ -231,7 +231,7 @@ val boostFromMoves: Map<String, Map<Stat, Int>> = mapOf(
     "rockpolish" to mapOf(Stats.SPEED to 2),
     "curse" to mapOf(Stats.ATTACK to 1, Stats.DEFENCE to 1, Stats.SPEED to -1),
     "minimize" to mapOf(Stats.EVASION to 2)
-)
+) //
 
 class StrongBattleAI(skill: Int) : BattleAI {
 
@@ -764,6 +764,29 @@ class StrongBattleAI(skill: Int) : BattleAI {
                             }
                         }
                     }
+                    // we wish if previous move is not wish
+                    "wish" -> if (previousAttackerMove?.name != "wish")
+                        if (expectedTurnsToPlay >= 1)
+                            return move
+                    // we provoc if opponent has 2 status moves or more
+                    "taunt" -> if (expectedTurnsToPlay >= 2) {
+                        if (!defenderSide.pokemon.volatileStatus.contains("taunt")
+                            && canUseStatusMove(field, move, attackerSide.pokemon, defenderSide.pokemon)
+                            && defenderSide.pokemon.moveSet.count { it.damageCategory == DamageCategories.STATUS} >= 2)
+                            return move
+                    }
+                    // we encore if opponent has 1 status move or more, we use encore half of the time
+                    // if we're quicker and opponent used a status move on previous turn, we use encore 90% of the time
+                    "encore" -> if (expectedTurnsToPlay >= 2) {
+                        if (defenderSide.pokemon.item !in choiceItems
+                            && !defenderSide.pokemon.volatileStatus.contains("encore")
+                            && canUseStatusMove(field, move, attackerSide.pokemon, defenderSide.pokemon)) {
+                            if (defenderSide.pokemon.moveSet.count { it.damageCategory == DamageCategories.STATUS} >= 1 && xChanceOn100(50))
+                                return move
+                            if (selectedIsQuicker(field, attackerSide, defenderSide) && previousDefenderMove?.damageCategory == DamageCategories.STATUS && xChanceOn100(90))
+                                return move
+                        }
+                    }
                     // if entry hazard of a type isn't on field, we put it
                     in entryHazards -> {
                         if (expectedTurnsToPlay >= 1) {
@@ -817,29 +840,6 @@ class StrongBattleAI(skill: Int) : BattleAI {
                                     && attackerSide.pokemon.currentHp < attackerSide.pokemon.stats.hp)
                                         return move
                             }
-                        }
-                    }
-                    // we wish if previous move is not wish
-                    "wish" -> if (previousAttackerMove?.name != "wish")
-                        if (expectedTurnsToPlay >= 1)
-                            return move
-                    // we provoc if opponent has 2 status moves or more
-                    "taunt" -> if (expectedTurnsToPlay >= 2) {
-                        if (!defenderSide.pokemon.volatileStatus.contains("taunt")
-                            && canUseStatusMove(field, move, attackerSide.pokemon, defenderSide.pokemon)
-                            && defenderSide.pokemon.moveSet.count { it.damageCategory == DamageCategories.STATUS} >= 2)
-                            return move
-                    }
-                    // we encore if opponent has 1 status move or more, we use encore half of the time
-                    // if we're quicker and opponent used a status move on previous turn, we use encore 90% of the time
-                    "encore" -> if (expectedTurnsToPlay >= 2) {
-                        if (defenderSide.pokemon.item !in choiceItems
-                            && !defenderSide.pokemon.volatileStatus.contains("encore")
-                            && canUseStatusMove(field, move, attackerSide.pokemon, defenderSide.pokemon)) {
-                            if (defenderSide.pokemon.moveSet.count { it.damageCategory == DamageCategories.STATUS} >= 1 && xChanceOn100(50))
-                                return move
-                            if (selectedIsQuicker(field, attackerSide, defenderSide) && previousDefenderMove?.damageCategory == DamageCategories.STATUS && xChanceOn100(90))
-                                return move
                         }
                     }
                     // we substitute if opponent has status moves or we can sometimes try to substitute if we win fight (because opponent could switch)
