@@ -138,7 +138,8 @@ data class DeathNumber(
 
 data class Switch(
     var uuid: UUID?,
-    var move: ActivePokemonMove?
+    var move: ActivePokemonMove?,
+    var isUrgent: Boolean
 )
 
 enum class ResetProperty {

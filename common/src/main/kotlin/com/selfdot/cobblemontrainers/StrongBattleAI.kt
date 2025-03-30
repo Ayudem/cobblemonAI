@@ -262,6 +262,7 @@ class StrongBattleAI(skill: Int) : BattleAI {
     private val entryHazards = listOf("spikes", "stealthrock", "stickyweb", "toxicspikes", "stoneaxe", "ceaselessedge")
     private val antiHazardsMoves = listOf("rapidspin", "defog", "tidyup", "courtchange")
     private val antiBoostMoves = listOf("slearsmog","haze", "whirlwind", "roar", "dragontail")
+    private val lowPrioAntiBoostMoves = listOf("whirlwind", "roar", "dragontail")
     private val protectMoves = listOf("detect", "protect", "banefulbunker", "burningbulwark", "kingsshield", "obstruct", "silktrap", "spikyshield")
     private val pivotMoves = listOf("uturn","flipturn", "partingshot", "batonpass", "chillyreception","shedtail", "voltswitch", "teleport")
     private val offensivePivotMoves = listOf("uturn","flipturn", "voltswitch")
@@ -698,6 +699,7 @@ class StrongBattleAI(skill: Int) : BattleAI {
             }
 
             damageHeal = damageAndHealDoneByMove(field, attackerSide, defenderSide, move, attackerIsQuicker, flinch, opponentProbableMove)
+
             // if we find a killing move with priority, we stop immediatly
             if ((attackerIsQuicker || move.priority > 0) && damageHeal.damage >= defenderCurrentHp) {
                 killerMoves.add(move)
@@ -709,10 +711,12 @@ class StrongBattleAI(skill: Int) : BattleAI {
                 effectiveHeal = attackerSide.pokemon.stats.hp - attackerCurrentHp
             else
                 effectiveHeal = damageHeal.heal
+
+            if (damageHeal.damage + effectiveHeal > 0.0) damagingMoves.add(move)
+            else notDamagingMoves.add(move)
+
             if (damageHeal.damage+effectiveHeal>=highestDamageHeal.damage+highestDamageHeal.heal) {
-                if (damageHeal.damage + effectiveHeal > 0.0) damagingMoves.add(move)
-                else notDamagingMoves.add(move)
-                if (killerMoves.isEmpty()) { // if we found a killer move already, it has already been selected as the best move
+                if (killerMoves.isEmpty()) { // if no killer move found, highest damage is the best move
                     highestDamageHeal = DamageHeal(damageHeal.damage, effectiveHeal)
                     bestMove = move
                 }
@@ -756,11 +760,17 @@ class StrongBattleAI(skill: Int) : BattleAI {
                     }
                     // if pokemon has anti-boost move, they use it when cumulative opponent boost is 2 or more
                     in antiBoostMoves -> {
-                        if (expectedTurnsToPlay >= 1) {
-                            if (defenderSide.pokemon.statBoosts.run { attack+specialAttack+defense+specialDefense+speed } >= 2.0) {
-                                if (!(move.name == "dragontail" && pokemonHasType(defenderSide.pokemon, ElementalTypes.FAIRY))) {
-                                    return move
+                        if (defenderSide.pokemon.statBoosts.run { attack+specialAttack+defense+specialDefense+speed } >= 2.0) {
+                            when (move.name) {
+                                in lowPrioAntiBoostMoves -> {
+                                    if (expectedTurnsToPlay >= 2) {
+                                        when (move.name) {
+                                            "dragontail" -> if (!pokemonHasType(defenderSide.pokemon, ElementalTypes.FAIRY)) return move
+                                            else -> return move
+                                        }
+                                    }
                                 }
+                                else -> if (expectedTurnsToPlay >= 1) return move
                             }
                         }
                     }
@@ -845,19 +855,21 @@ class StrongBattleAI(skill: Int) : BattleAI {
                     // we substitute if opponent has status moves or we can sometimes try to substitute if we win fight (because opponent could switch)
                     "substitute" -> {
                         if (expectedTurnsToPlay >= 2) {
-                            if (attackerWins) {
-                                if (xChanceOn100(50)) return move
+                            if (!attackerSide.pokemon.volatileStatus.contains("substitute")) {
+                                if (attackerWins) {
+                                    if (xChanceOn100(50)) return move
+                                }
+                                if (xChanceOn100(
+                                        countMoveWithDamage(
+                                            field,
+                                            defenderSide,
+                                            attackerSide,
+                                            attackerSide.pokemon.stats.hp / 4,
+                                            false
+                                        ) * 25
+                                    )
+                                ) return move
                             }
-                            if (xChanceOn100(
-                                    countMoveWithDamage(
-                                        field,
-                                        defenderSide,
-                                        attackerSide,
-                                        attackerSide.pokemon.stats.hp / 4,
-                                        false
-                                    ) * 25
-                                )
-                            ) return move
                         }
                     }
                     // we healing wish if it's our last move before dying and hp is not full
@@ -1929,7 +1941,7 @@ class StrongBattleAI(skill: Int) : BattleAI {
 
         for (pokemon in npcSide.team) {
             if (get1v1ResultWithSwitch(field, playerSide, npcSide, pokemon, null, fightResult.playerMostProbableMove).npcWins)
-                availableSwitches.add(Switch(pokemon.uuid,pivotMove))
+                availableSwitches.add(Switch(pokemon.uuid,pivotMove, false))
         }
         return availableSwitches
     }
@@ -1944,7 +1956,7 @@ class StrongBattleAI(skill: Int) : BattleAI {
             if (pokemonHasMove(pokemon, antiBoostMoves)) {
                 tryToFightAfterSwitch = get1v1ResultWithSwitch(field, playerSide, npcSide, pokemon, null, fightResult.playerMostProbableMove)
                 if (tryToFightAfterSwitch.turnsToKillNpc > 1 || tryToFightAfterSwitch.npcIsQuicker)
-                    availableSwitches.add(Switch(pokemon.uuid,pivotMove))
+                    availableSwitches.add(Switch(pokemon.uuid,pivotMove, true))
             }
         }
         return availableSwitches
@@ -1958,7 +1970,7 @@ class StrongBattleAI(skill: Int) : BattleAI {
         for (pokemon in npcSide.team) {
             if (pokemonHasBoostMove(pokemon)) {
                 if (get1v1ResultWithSwitch(field, playerSide, npcSide, pokemon, null, fightResult.playerMostProbableMove).npcWins)
-                    availableSwitches.add(Switch(pokemon.uuid, shedTail))
+                    availableSwitches.add(Switch(pokemon.uuid, shedTail, false))
             }
         }
         return if (availableSwitches.isNotEmpty()) availableSwitches
@@ -1972,11 +1984,11 @@ class StrongBattleAI(skill: Int) : BattleAI {
         // both pokemon dead at the same turn
         // if both pokemons are gone, we switch randomly before calculating anything
         if (npcSide.pokemon.name == "" && playerSide.pokemon.name == "") {
-            return Switch(npcSide.team.random().uuid, move)
+            return Switch(npcSide.team.random().uuid, move, false)
         }
 
         // antiboost security,
-        if (getCumulatedBoosts(playerSide.pokemon) > 0) {
+        if (getCumulatedBoosts(playerSide.pokemon) > 0 && !pokemonHasMove(npcSide.pokemon, antiBoostMoves)) {
             availableSwitches = antiSetupSwitches(field, playerSide, npcSide, fightResult)
             if (availableSwitches.isNotEmpty()) return availableSwitches.random()
         }
@@ -2000,7 +2012,7 @@ class StrongBattleAI(skill: Int) : BattleAI {
         }
 
         // no relevant switch found
-        return Switch(null, null)
+        return Switch(null, null, false)
     }
 
     private fun emptySlotSwitchStrategy(field: Field, playerSide: Side, npcSide: Side): UUID {
@@ -2075,18 +2087,24 @@ class StrongBattleAI(skill: Int) : BattleAI {
                 return chooseMove(getMoveFromShowdownMoveSet(moveset!!, fightResult.npcMovesInfos.killerMoves.random().name)!!, activeBattlePokemon)
             }
 
+            // if we determined the switch is urgent and can switch, we do
+            if (canSwitch(p2Actor.request, battleState.npcSide.pokemon, battleState.playerSide.pokemon) && chosenSwitch.uuid != null && chosenSwitch.isUrgent) {
+                if (chosenSwitch.move != null) {
+                    battleTracker.npcForcedSwitch = chosenSwitch.uuid!!
+                    return chooseMove(getMoveFromShowdownMoveSet(moveset!!, chosenSwitch.move!!.name)!!, activeBattlePokemon)
+                } else return SwitchActionResponse(chosenSwitch.uuid!!)
+            }
+
             // we check for important utility moves before deciding if we attack or switch
             if (utilityMove != null) return chooseMove(getMoveFromShowdownMoveSet(moveset!!, utilityMove.name)!!, activeBattlePokemon)
 
             // if we can switch and we determined we should, we do
-                if (canSwitch(p2Actor.request, battleState.npcSide.pokemon, battleState.playerSide.pokemon)) {
-                    if (chosenSwitch.uuid != null) {
-                        if (chosenSwitch.move != null) {
-                            battleTracker.npcForcedSwitch = chosenSwitch.uuid!!
-                            return chooseMove(getMoveFromShowdownMoveSet(moveset!!, chosenSwitch.move!!.name)!!, activeBattlePokemon)
-                        } else return SwitchActionResponse(chosenSwitch.uuid!!)
-                    }
-                }
+            if (canSwitch(p2Actor.request, battleState.npcSide.pokemon, battleState.playerSide.pokemon) && chosenSwitch.uuid != null) {
+                if (chosenSwitch.move != null) {
+                    battleTracker.npcForcedSwitch = chosenSwitch.uuid!!
+                    return chooseMove(getMoveFromShowdownMoveSet(moveset!!, chosenSwitch.move!!.name)!!, activeBattlePokemon)
+                } else return SwitchActionResponse(chosenSwitch.uuid!!)
+            }
 
             // if opponent used destiny bond, we use a 0-damage move or try to switch
             if (destinyBondWarning(fightResult)) {
@@ -2098,12 +2116,13 @@ class StrongBattleAI(skill: Int) : BattleAI {
             }
 
             // if we win the 1v1 or can't find a relevant switch, we fight
-            if (xChanceOn100(80))
+            if (xChanceOn100(80) || battleState.npcSide.pokemon.status == "slp") // a bit weird here but if pokemon is asleep, damagingMoves will always be empty, so we won't try another damaging move because we have none
                 return chooseMove(getMoveFromShowdownMoveSet(moveset!!, fightResult.npcMovesInfos.usedMove.move.name)!!, activeBattlePokemon)
             else {
                 if (fightResult.npcMovesInfos.damagingMoves.isNotEmpty())
                     return chooseMove(getMoveFromShowdownMoveSet(moveset!!, fightResult.npcMovesInfos.damagingMoves.random().name)!!, activeBattlePokemon)
             }
+
             // we shouldn't get there. If you do, upgrade this shitty AI and make it better !!
             println("This AI is shit and couldn't know what to do")
             return PassActionResponse
@@ -2123,6 +2142,7 @@ class StrongBattleAI(skill: Int) : BattleAI {
             return PassActionResponse
         }
     }
+
     private fun chooseMove(move: InBattleMove, activeBattlePokemon: ActiveBattlePokemon): MoveActionResponse {
         val target = if (move.mustBeUsed()) null else move.target.targetList(activeBattlePokemon)
         if (target == null)
