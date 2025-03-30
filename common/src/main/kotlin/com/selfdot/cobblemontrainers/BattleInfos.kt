@@ -116,7 +116,8 @@ data class BattleTracker(
     var previousPlayerPokemon: UUID?,
     var previousNpcPokemon: UUID?,
     var deathNumber: DeathNumber,
-    val previousMoves: PreviousMoves
+    val previousMoves: PreviousMoves,
+    var npcForcedSwitch: UUID?,
 )
 
 data class PokemonTracker(

@@ -240,7 +240,7 @@ class StrongBattleAI(skill: Int) : BattleAI {
     private val flinch30Moves = listOf("airslash", "astonish", "bite", "doubleironbash", "headbutt", "heartstamp", "iciclecrash", "ironhead", "rockslide", "rollingkick", "skyattack", "stomp", "zingzap", "steamroller", "snore")
     private val flinch20Moves = listOf("darkpulse", "dragonrush", "waterfall")
     private val flinch10Moves = listOf("boneclub", "extrasensory", "firefang", "hyperfang", "icefang", "thunderfang")
-    private val offensiveUtilityMoves = listOf("direclaw", "knockoff", "nuzzle", "dragontail", "stoneaxe", "ceaselessedge")
+    private val offensiveUtilityMoves = listOf("direclaw", "knockoff", "nuzzle", "dragontail", "stoneaxe", "ceaselessedge", "fakeout")
     private val contactMoves = listOf("tackle","scratch","pound","slash","cut","furyswipes","rapidspin","megapunch","firepunch","thunderpunch","icepunch","dizzypunch","machpunch","cometpunch","dynamicpunch","closecombat","crosschop","doublekick","highjumpkick","jumpkick","lowkick","rollingkick","triplekick","bite","crunch","hyperfang","superfang","headbutt","hornattack","furyattack","horndrill","drillpeck","peck","pluck","wingattack","fly","dive","dig","bodyslam","doubleedge","takedown","flareblitz","bravebird","volttackle","wildcharge","headcharge","woodhammer","headsmash","aquatail","irontail","dragontail","shadowpunch","shadowclaw","nightslash","psychocut","xscissor","uturn","dragonclaw","dragonrush","outrage","falseswipe","leafblade","sacredsword","secretsword","meteormash","bulletpunch","drainpunch","hammerarm","poweruppunch","skyuppercut","suckerpunch","throatchop","darkestlariat","wickedblow","axekick","ragingbull","aquastep","accelerock","armthrust","astralbarrage","attackorder","barbbarrage","behemothblade","bittermalice","bleakwindstorm","ceaselessedge","collisioncourse","combattorque","crushgrip","darkpulse","direclaw","dragonenergy","dragonascent","dragonclaw","dragonrush","esperwing","filletaway","flamecharge","flipturn","freezeshock","gigatonhammer","glaiverush","grassyglide","gravapple","heartstamp","icehammer","icespinner","iceshard","iciclecrash","iciclespear","infernalparade","ivycudgel","jetpunch","kowtowcleave","lastrespects","liquidation","lunge","magicaltorque","mightycleave","mortalspin","mountaingale","muddywater","nuzzle","obstruct","orderup","populationbomb","pounce","psychofangs","psyshieldbash","ragingfury","razorshell","rockblast","ruination","saltcure","sandsearstorm","savagevoltage","seamitarsu","shadowforce","shedtail","shellsidearm","shelter","skittersmack","slam","smackdown","solarblade","spicyextract","spiritbreak","springtidestorm","stoneaxe","stoneedge","stormrush","supercellslam","surgingstrikes","swordsdance","takeheart","terablast","thunderouskick","torchsong","torment","triplearrows","tripledive","tropkick","upperhand","victorydance","wavecrash","wickedtorque","wildboltstorm","zenheadbutt") // omg there are so much, thanks deepseek for this line
     private val selfDamage1to4Moves = listOf("doubleedge","takedown","submission","wildcharge","headcharge")
     private val selfDamage1to3Moves = listOf("flareblitz","bravebird","volttackel","woodhammer","wavecrash")
@@ -264,6 +264,7 @@ class StrongBattleAI(skill: Int) : BattleAI {
     private val antiBoostMoves = listOf("slearsmog","haze", "whirlwind", "roar", "dragontail")
     private val protectMoves = listOf("detect", "protect", "banefulbunker", "burningbulwark", "kingsshield", "obstruct", "silktrap", "spikyshield")
     private val pivotMoves = listOf("uturn","flipturn", "partingshot", "batonpass", "chillyreception","shedtail", "voltswitch", "teleport")
+    private val offensivePivotMoves = listOf("uturn","flipturn", "voltswitch")
     private val setupMoves = setOf("tailwind", "trickroom", "auroraveil", "lightscreen", "reflect")
     private val selfRecoveryMoves = listOf("healorder", "milkdrink", "recover", "rest", "roost", "slackoff", "softboiled", "strengthsap")
     private val itemManipulationMoves = listOf("knockoff", "corrosivegas","covet", "embargo", "switcheroo", "trick", "thief")
@@ -279,12 +280,14 @@ class StrongBattleAI(skill: Int) : BattleAI {
     private val hapinessPower = 102.0 // supposed power of return and frustration
     private val turnAliveToBoost = 4 // chosen completely arbitrary. Number of turn the pokemon need to be able to survive to use a boost move without other thinking
 
+    // used to keep informations about stuff in battle we can't get with activeBattlePokemon (or maybe I just don't know how)
     private val battleTracker = BattleTracker(
         mutableMapOf<UUID, PokemonTracker>(),
         null,
         null,
-        DeathNumber(0,0),
-        PreviousMoves(null, null)) // used to keep informations about changed item/abilities in battle
+        DeathNumber(0,0), // the actual number of death, not just the number of dead pokemons
+        PreviousMoves(null, null),
+        null)
 
     // get all used information about a pokemon moveset
     private fun getActivePokemonMoveSet(pokemon: Pokemon?, request: ShowdownActionRequest?): List<ActivePokemonMove> {
@@ -525,8 +528,8 @@ class StrongBattleAI(skill: Int) : BattleAI {
             if(!weHaveAWinner) {
                 weHaveAWinner = true
                 npcWins = !isNpc
-                if (isNpc) println("player wins")
-                else println("npc wins")
+                //if (isNpc) println("player wins")
+                //else println("npc wins")
             }
             if (isNpc) npcAlive = false
             else playerAlive = false
@@ -557,18 +560,21 @@ class StrongBattleAI(skill: Int) : BattleAI {
         if (playerCurrentHp.pokemon <= 0) pokemonDead(false)
         if (npcCurrentHp.pokemon <= 0) pokemonDead(true)
 
+        //println("BATTLE START")
+        //println(npcSide.pokemon.name+" vs "+playerSide.pokemon.name)
+        //println("--------------------------------------")
         // each iteration represent a turn
         while ((npcAlive || playerAlive) && turnsToKillNpc < maxTurns && turnsToKillPlayer < maxTurns) {
             // ONE MORE TURN ALIVE
-            println("TURN START")
+            //println("TURN START")
             if (npcAlive) turnsToKillNpc += 1
             if (playerAlive) turnsToKillPlayer += 1
 
             // TAKING DECISION
             playerMoves = mostProbableOffensiveMove(field, playerSide, npcSide, playerCurrentHp.pokemon, npcCurrentHp.pokemon,!npcIsQuicker,false)
             npcMoves = mostProbableOffensiveMove(field, npcSide, playerSide, npcCurrentHp.pokemon, playerCurrentHp.pokemon,npcIsQuicker,false)
-            println("[ATTACK] player do "+playerMoves.usedMove.value.damage+" damages and "+playerMoves.usedMove.value.heal+" heal with move: "+playerMoves.usedMove.move.name)
-            println("[ATTACK] npc do "+npcMoves.usedMove.value.damage+" damages and "+npcMoves.usedMove.value.heal+" heal with move: "+npcMoves.usedMove.move.name)
+            //println("[ATTACK] player do "+playerMoves.usedMove.value.damage+" damages and "+playerMoves.usedMove.value.heal+" heal with move: "+playerMoves.usedMove.move.name)
+            //println("[ATTACK] npc do "+npcMoves.usedMove.value.damage+" damages and "+npcMoves.usedMove.value.heal+" heal with move: "+npcMoves.usedMove.move.name)
 
             // Selecting the next most probable move selected by player for next Real turn
             if (firstIteration) {
@@ -591,15 +597,15 @@ class StrongBattleAI(skill: Int) : BattleAI {
             playerEndTurnDamageHeal = damageAndHealEndTurn(field, playerSide.pokemon, npcSide.pokemon)
             npcCurrentHp.pokemon-=npcEndTurnDamageHeal.damage-npcEndTurnDamageHeal.heal
             playerCurrentHp.pokemon-=playerEndTurnDamageHeal.damage-playerEndTurnDamageHeal.heal
-            println("[RESIDUAL] player take "+playerEndTurnDamageHeal.damage+" damages and "+playerEndTurnDamageHeal.heal+" heal by residual effects")
-            println("[RESIDUAL] npc take "+npcEndTurnDamageHeal.damage+" damages and "+npcEndTurnDamageHeal.heal+" heal by residual effects")
+            //println("[RESIDUAL] player take "+playerEndTurnDamageHeal.damage+" damages and "+playerEndTurnDamageHeal.heal+" heal by residual effects")
+            //println("[RESIDUAL] npc take "+npcEndTurnDamageHeal.damage+" damages and "+npcEndTurnDamageHeal.heal+" heal by residual effects")
 
             if (playerCurrentHp.pokemon <= 0) pokemonDead(false)
             if (npcCurrentHp.pokemon <= 0) pokemonDead(true)
         }
 
-        println("player will survive "+turnsToKillPlayer+" turns")
-        println("npc will survive "+turnsToKillNpc+" turns")
+        //println("player will survive "+turnsToKillPlayer+" turns")
+        //println("npc will survive "+turnsToKillNpc+" turns")
 
         return Battle1v1State (
             turnsToKillPlayer,
@@ -613,9 +619,7 @@ class StrongBattleAI(skill: Int) : BattleAI {
 
     // simulate a 1v1 but starting with a switch of at least one pokemon
     private fun get1v1ResultWithSwitch(field:Field, playerSide:Side, npcSide:Side, otherNpcPokemon:ActivePokemon?, otherPlayerPokemon:ActivePokemon?, moveOnSwitch:ActivePokemonMove?): Battle1v1State {
-        // I really don't like what I do here, but the only other solution would be for Side.pokemon to be a var and it create problems of notnull verifications everywhere in the code
-
-        // TODO : handle when switched pokemon arrive on field with a substitute
+        // TODO : handle when switched pokemon arrive on field with a substitute (with shed tail or baton pass)
 
         var newPlayerSide = playerSide
         var newNpcSide = npcSide
@@ -740,6 +744,7 @@ class StrongBattleAI(skill: Int) : BattleAI {
         for (move in getEnabledMoves(attackerSide.pokemon.moveSet)) {
             if (move.damageCategory == DamageCategories.STATUS || move.name in offensiveUtilityMoves) {
                 when (move.name) {
+                    "fakeout" -> if (!pokemonHasType(defenderSide.pokemon, ElementalTypes.GHOST) && battleTracker.previousNpcPokemon != attackerSide.pokemon.uuid) return move
                     // we protect if opponent residual damagevalue is higher than our. we always protect if it's kingsshield
                     in protectMoves -> {
                         if (previousAttackerMove?.name !in protectMoves) {
@@ -1722,14 +1727,29 @@ class StrongBattleAI(skill: Int) : BattleAI {
         else return true
     }
 
+    // TODO : remove this and replace by findPokemonMove(stuff) != null
     private fun pokemonHasMove(pokemon: ActivePokemon, move: String): Boolean {
         if (move in pokemon.moveSet.map {it.name}) return true
         else return false
     }
 
     private fun pokemonHasMove(pokemon: ActivePokemon, moveList: List<String>): Boolean {
-        if (pokemon.moveSet.map {it.name}.intersect(antiBoostMoves).isNotEmpty()) return true
+        if (pokemon.moveSet.map {it.name}.intersect(moveList.toSet()).isNotEmpty()) return true
         else return false
+    }
+
+    private fun findPokemonMove(pokemon: ActivePokemon, move: String): ActivePokemonMove? {
+        pokemon.moveSet. forEach {
+            if (it.name == move) return it
+        }
+        return null
+    }
+
+    private fun findPokemonMove(pokemon: ActivePokemon, moveList: List<String>): ActivePokemonMove? {
+        pokemon.moveSet. forEach {
+            if (it.name in moveList) return it
+        }
+        return null
     }
 
     private fun pokemonHasBoostMove(pokemon: ActivePokemon): Boolean {
@@ -1744,6 +1764,16 @@ class StrongBattleAI(skill: Int) : BattleAI {
             || (selectedAttackFirst(field, attackerSide, defenderSide,move,opponentMove) && turnsToLive == 1))
                 return true
         else return false
+    }
+
+    private fun npcAttacksFirst(fightResult: Battle1v1State, move: ActivePokemonMove?): Boolean {
+        lateinit var usedMove: ActivePokemonMove
+        if (move != null) usedMove = move
+            else usedMove = fightResult.npcMovesInfos.usedMove.move
+
+        if (usedMove.priority > fightResult.playerMostProbableMove.priority) return true
+        else if (usedMove.priority < fightResult.playerMostProbableMove.priority) return false
+        else return fightResult.npcIsQuicker
     }
 
     private fun countMoveWithDamage(field: Field, attackerSide: Side, defenderSide: Side, damage: Double, moreOrLess:Boolean): Int {
@@ -1846,6 +1876,7 @@ class StrongBattleAI(skill: Int) : BattleAI {
     }
 
     private fun getMoveFromShowdownMoveSet(moveset: ShowdownMoveset, name: String): InBattleMove? {
+        // TODO: this shouldn't return null ever, can we return struggle instead ?
         for (move in moveset.moves) {
             if (move.id == name) return move
         }
@@ -1867,51 +1898,76 @@ class StrongBattleAI(skill: Int) : BattleAI {
         else 0
     }
 
-    private fun standardSwitches(field: Field, playerSide: Side, npcSide: Side, opponentMove: ActivePokemonMove?): List<UUID> {
-        val availableSwitches = mutableListOf<UUID>()
+    private fun shouldUsePivotMove(field: Field, playerSide: Side, npcSide: Side, fightResult: Battle1v1State): ActivePokemonMove? {
+        val pivotMove = findPokemonMove(npcSide.pokemon, pivotMoves)
+        if (pivotMove != null) {
+            when (pivotMove.name) {
+                "teleport" -> if (fightResult.turnsToKillNpc >= 2) return pivotMove
+                "shedTail" -> if (npcSide.pokemon.currentHp > npcSide.pokemon.stats.hp/2) {
+                    if (npcAttacksFirst(fightResult, pivotMove)
+                        || npcSide.pokemon.currentHp - damageAndHealDoneByMove(field, playerSide, npcSide, fightResult.playerMostProbableMove, true, 0.0, null).damage > npcSide.pokemon.stats.hp/2)
+                        return pivotMove
+                }
+                else -> {
+                    if (npcAttacksFirst(fightResult, pivotMove) || fightResult.turnsToKillNpc >= 2) {
+                        when (pivotMove.name) {
+                            in offensivePivotMoves -> if (getDamageTypeMultiplier(field, npcSide, playerSide, pivotMove) > 0) return pivotMove
+                            in listOf("batonpass", "chillyreception") -> return pivotMove
+                            "partingshot" -> if (playerSide.pokemon.ability !in listOf("soundproof", "goodasgold")) return pivotMove
+                        }
+                    }
+                }
+            }
+        }
+        return null
+    }
+
+    private fun standardSwitches(field: Field, playerSide: Side, npcSide: Side, fightResult: Battle1v1State): List<Switch> {
+        val availableSwitches = mutableListOf<Switch>()
+        val pivotMove = shouldUsePivotMove(field, playerSide, npcSide, fightResult)
+
 
         for (pokemon in npcSide.team) {
-            if (get1v1ResultWithSwitch(field, playerSide, npcSide, pokemon, null, opponentMove).npcWins)
-                availableSwitches.add(pokemon.uuid)
+            if (get1v1ResultWithSwitch(field, playerSide, npcSide, pokemon, null, fightResult.playerMostProbableMove).npcWins)
+                availableSwitches.add(Switch(pokemon.uuid,pivotMove))
         }
         return availableSwitches
     }
 
     // search for an anti-setup pokemon
-    private fun antiSetupSwitches(field: Field, playerSide: Side, npcSide: Side, opponentMove: ActivePokemonMove?): List<UUID> {
-        val availableSwitches = mutableListOf<UUID>()
+    private fun antiSetupSwitches(field: Field, playerSide: Side, npcSide: Side, fightResult: Battle1v1State): List<Switch> {
+        val availableSwitches = mutableListOf<Switch>()
+        val pivotMove = shouldUsePivotMove(field, playerSide, npcSide, fightResult)
         lateinit var tryToFightAfterSwitch: Battle1v1State
 
         for (pokemon in npcSide.team) {
             if (pokemonHasMove(pokemon, antiBoostMoves)) {
-                tryToFightAfterSwitch = get1v1ResultWithSwitch(field, playerSide, npcSide, pokemon, null, opponentMove)
+                tryToFightAfterSwitch = get1v1ResultWithSwitch(field, playerSide, npcSide, pokemon, null, fightResult.playerMostProbableMove)
                 if (tryToFightAfterSwitch.turnsToKillNpc > 1 || tryToFightAfterSwitch.npcIsQuicker)
-                    availableSwitches.add(pokemon.uuid)
+                    availableSwitches.add(Switch(pokemon.uuid,pivotMove))
             }
         }
         return availableSwitches
     }
 
     // look for a setup pokemon first and for a winner one after
-    private fun shedtailSwitches(field: Field, playerSide: Side, npcSide: Side, opponentMove: ActivePokemonMove?): List<UUID> {
-        val availableSwitches = mutableListOf<UUID>()
-        lateinit var tryToFightAfterSwitch: Battle1v1State
+    private fun shedTailSwitches(field: Field, playerSide: Side, npcSide: Side, fightResult: Battle1v1State): List<Switch> {
+        val availableSwitches = mutableListOf<Switch>()
+        val shedTail = shouldUsePivotMove(field, playerSide, npcSide, fightResult)
 
         for (pokemon in npcSide.team) {
             if (pokemonHasBoostMove(pokemon)) {
-                if (get1v1ResultWithSwitch(field, playerSide, npcSide, pokemon, null, opponentMove).npcWins)
-                    availableSwitches.add(pokemon.uuid)
+                if (get1v1ResultWithSwitch(field, playerSide, npcSide, pokemon, null, fightResult.playerMostProbableMove).npcWins)
+                    availableSwitches.add(Switch(pokemon.uuid, shedTail))
             }
         }
         return if (availableSwitches.isNotEmpty()) availableSwitches
-        else standardSwitches(field, npcSide, playerSide, opponentMove)
+        else standardSwitches(field, npcSide, playerSide, fightResult)
     }
 
     private fun switchStrategy(field: Field, playerSide: Side, npcSide: Side, fightResult: Battle1v1State): Switch {
-        var availableSwitches:List<UUID>
-        lateinit var tryToFightAfterSwitch: Battle1v1State
+        var availableSwitches:List<Switch>
         var move:ActivePokemonMove? = null
-        val expectedTurnsToPlay = expectedTurnsToPlay(fightResult.turnsToKillNpc, selectedIsQuicker(field, npcSide, playerSide))
 
         // both pokemon dead at the same turn
         // if both pokemons are gone, we switch randomly before calculating anything
@@ -1921,50 +1977,55 @@ class StrongBattleAI(skill: Int) : BattleAI {
 
         // antiboost security,
         if (getCumulatedBoosts(playerSide.pokemon) > 0) {
-            availableSwitches = antiSetupSwitches(field, playerSide, npcSide, fightResult.playerMostProbableMove)
-            if (availableSwitches.isNotEmpty()) return Switch(availableSwitches.random(),move)
+            availableSwitches = antiSetupSwitches(field, playerSide, npcSide, fightResult)
+            if (availableSwitches.isNotEmpty()) return availableSwitches.random()
         }
 
         // shed tail move
         if (pokemonHasMove(npcSide.pokemon, "shedtail")) {
-            availableSwitches = shedtailSwitches(field, playerSide, npcSide, fightResult.playerMostProbableMove)
-            if (availableSwitches.isNotEmpty()) return Switch(availableSwitches.random(),move)
+            availableSwitches = shedTailSwitches(field, playerSide, npcSide, fightResult)
+            if (availableSwitches.isNotEmpty() && availableSwitches.random().move != null) return availableSwitches.random()
         }
 
-        // offensive switch move
-        if (pokemonHasMove(npcSide.pokemon, offensiveSwitchMoves)) {
-            availableSwitches = standardSwitches(field, playerSide, npcSide, fightResult.playerMostProbableMove)
-            if (availableSwitches.isNotEmpty() && xChanceOn100(50)) return Switch(availableSwitches.random(),move)
+        // offensive proactive move
+        if (pokemonHasMove(npcSide.pokemon, pivotMoves)) {
+            availableSwitches = standardSwitches(field, playerSide, npcSide, fightResult)
+            if (availableSwitches.isNotEmpty() && availableSwitches.random().move != null && xChanceOn100(50)) return availableSwitches.random()
         }
 
         // fight lost
         if (!fightResult.npcWins) {
-            availableSwitches = standardSwitches(field, playerSide, npcSide, fightResult.playerMostProbableMove)
-            if (availableSwitches.isNotEmpty()) return Switch(availableSwitches.random(),move)
+            availableSwitches = standardSwitches(field, playerSide, npcSide, fightResult)
+            if (availableSwitches.isNotEmpty()) return availableSwitches.random()
         }
 
         // no relevant switch found
         return Switch(null, null)
     }
 
-    private fun deathSwitchStrategy(field: Field, playerSide: Side, npcSide: Side): UUID {
-        val availableSwitches:List<UUID> = standardSwitches(field, playerSide, npcSide, null)
+    private fun emptySlotSwitchStrategy(field: Field, playerSide: Side, npcSide: Side): UUID {
+        val availableSwitches = mutableListOf<UUID>()
+
+
+        for (pokemon in npcSide.team) {
+            if (get1v1ResultWithSwitch(field, playerSide, npcSide, pokemon, null, null).npcWins)
+                availableSwitches.add(pokemon.uuid)
+        }
 
         // forced switch because no pokemon on field
         return if (availableSwitches.isEmpty()) npcSide.team.random().uuid
         else availableSwitches.random()
     }
 
-    // check if one of the trainers switched (mainly to handle abilities in battle tracker right now
+    // check if one of the trainers switched to reset abilities
     private fun checkPreviousPokemonForReset(playerPokemon: BattlePokemon?, npcPokemon: BattlePokemon?) {
-        if (battleTracker.previousPlayerPokemon != playerPokemon?.uuid) {
-            resetTrackerAbility(playerPokemon?.uuid, playerPokemon)
-            battleTracker.previousPlayerPokemon = playerPokemon?.uuid
-        }
-        if (battleTracker.previousNpcPokemon != npcPokemon?.uuid) {
-            resetTrackerAbility(npcPokemon?.uuid, npcPokemon)
-            battleTracker.previousNpcPokemon = npcPokemon?.uuid
-        }
+        if (battleTracker.previousPlayerPokemon != playerPokemon?.uuid) resetTrackerAbility(playerPokemon?.uuid, playerPokemon)
+        if (battleTracker.previousNpcPokemon != npcPokemon?.uuid) resetTrackerAbility(npcPokemon?.uuid, npcPokemon)
+    }
+
+    private fun updatePreviousPokemon(playerPokemon: ActivePokemon?, npcPokemon: ActivePokemon?){
+        battleTracker.previousPlayerPokemon = playerPokemon?.uuid
+        battleTracker.previousNpcPokemon = npcPokemon?.uuid
     }
 
     // use this and rename it if I/You have to reset more stuff in battleTracker when switched out (just need abilities right now)
@@ -1981,7 +2042,6 @@ class StrongBattleAI(skill: Int) : BattleAI {
     // old function definition
     //override fun choose(request: ShowdownActionRequest, active: ActivePokemon, moves: List<MoveChoice>, canDynamax: Boolean, possibleMoves: List<Move>): ShowdownActionResponse {
     override fun choose(activeBattlePokemon: ActiveBattlePokemon, moveset: ShowdownMoveset?, forceSwitch: Boolean): ShowdownActionResponse {
-        // TODO : what is BattlePokemon.effectedPokemon ????§§§
         try {
             // get the current battle and set it as a variable
             val battle = activeBattlePokemon.battle
@@ -1995,13 +2055,19 @@ class StrongBattleAI(skill: Int) : BattleAI {
             val battleState = getBattleInfos(activeBattlePokemon)
 
             // if we're dead, we look for a good switch, if we can't find one, we switch randomly
-            if (forceSwitch || activeBattlePokemon.isGone())
-                return SwitchActionResponse(deathSwitchStrategy(battleState.field, battleState.playerSide, battleState.npcSide))
+            if (forceSwitch || activeBattlePokemon.isGone()) {
+                if (battleTracker.npcForcedSwitch != null) {
+                    val forcedSwitch = battleTracker.npcForcedSwitch!!
+                    battleTracker.npcForcedSwitch = null
+                    return SwitchActionResponse(forcedSwitch)
+                } else return SwitchActionResponse(emptySlotSwitchStrategy(battleState.field, battleState.playerSide, battleState.npcSide))
+            }
 
             // we should get to here only if we have a pokemon on each side of the board
             val fightResult = get1v1Result(battleState.field, battleState.playerSide, battleState.npcSide)
             val utilityMove = usableUtilityMove(battleState.field, battleState.npcSide, battleState.playerSide, fightResult.turnsToKillNpc, fightResult.turnsToKillPlayer, fightResult.npcWins, fightResult.playerMostProbableMove, battleTracker.previousMoves.npc, battleTracker.previousMoves.player)
-            var chosenSwitch = switchStrategy(battleState.field, battleState.playerSide, battleState.npcSide, fightResult)
+            val chosenSwitch = switchStrategy(battleState.field, battleState.playerSide, battleState.npcSide, fightResult)
+            updatePreviousPokemon(battleState.playerSide.pokemon, battleState.npcSide.pokemon)
 
             // if we can kill immediatly
             if (fightResult.npcMovesInfos.killerMoves.isNotEmpty() && fightResult.npcWins && !destinyBondWarning(fightResult)) {
@@ -2012,18 +2078,15 @@ class StrongBattleAI(skill: Int) : BattleAI {
             // we check for important utility moves before deciding if we attack or switch
             if (utilityMove != null) return chooseMove(getMoveFromShowdownMoveSet(moveset!!, utilityMove.name)!!, activeBattlePokemon)
 
-            // if we can't win the 1v1, we try to switch
-            // TODO : add easier switches for pivot oriented pokemons (like pokemons with regenerator)
-            // TODO : add switches with a move
-            if (!fightResult.npcWins) {
-                // todo créer la méthode switchWithMove() ou on va déterminer si on switch avec u-turn ou pas
+            // if we can switch and we determined we should, we do
                 if (canSwitch(p2Actor.request, battleState.npcSide.pokemon, battleState.playerSide.pokemon)) {
-                    println(chosenSwitch.uuid)
-                    battleState.npcSide.team.forEach { println(it.uuid) }
-                    println("FLOP")
-                    if (chosenSwitch.uuid != null) return SwitchActionResponse(chosenSwitch.uuid!!)
+                    if (chosenSwitch.uuid != null) {
+                        if (chosenSwitch.move != null) {
+                            battleTracker.npcForcedSwitch = chosenSwitch.uuid!!
+                            return chooseMove(getMoveFromShowdownMoveSet(moveset!!, chosenSwitch.move!!.name)!!, activeBattlePokemon)
+                        } else return SwitchActionResponse(chosenSwitch.uuid!!)
+                    }
                 }
-            }
 
             // if opponent used destiny bond, we use a 0-damage move or try to switch
             if (destinyBondWarning(fightResult)) {
@@ -2060,7 +2123,6 @@ class StrongBattleAI(skill: Int) : BattleAI {
             return PassActionResponse
         }
     }
-
     private fun chooseMove(move: InBattleMove, activeBattlePokemon: ActiveBattlePokemon): MoveActionResponse {
         val target = if (move.mustBeUsed()) null else move.target.targetList(activeBattlePokemon)
         if (target == null)
