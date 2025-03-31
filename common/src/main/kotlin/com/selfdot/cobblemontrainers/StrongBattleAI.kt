@@ -260,7 +260,8 @@ class StrongBattleAI(skill: Int) : BattleAI {
     private val halfLifeDamageMoves = listOf("superfang", "naturesmadness", "ruination")
     private val screenMoves = listOf("protect", "lightscreen", "auroraveil")
     private val entryHazards = listOf("spikes", "stealthrock", "stickyweb", "toxicspikes", "stoneaxe", "ceaselessedge")
-    private val antiHazardsMoves = listOf("rapidspin", "defog", "tidyup", "courtchange")
+    private val nonOffensiveEntryHazards = listOf("spikes", "stealthrock", "stickyweb", "toxicspikes")
+    private val antiHazardsMoves = listOf("rapidspin", "defog", "tidyup", "courtchange", "mortalspin")
     private val antiBoostMoves = listOf("slearsmog","haze", "whirlwind", "roar", "dragontail")
     private val lowPrioAntiBoostMoves = listOf("whirlwind", "roar", "dragontail")
     private val protectMoves = listOf("detect", "protect", "banefulbunker", "burningbulwark", "kingsshield", "obstruct", "silktrap", "spikyshield")
@@ -493,13 +494,16 @@ class StrongBattleAI(skill: Int) : BattleAI {
         val npcCurrentHp = ActorCurrentHp(
             npcSide.pokemon.currentHp,
             if (npcSide.pokemon.volatileStatus.contains("substitute")) npcSide.pokemon.stats.hp/4 else 0.0,
+            if (npcSide.pokemon.ability == "disguise" && (battleTracker.pokemons[npcSide.pokemon.uuid] == null || battleTracker.pokemons[npcSide.pokemon.uuid]!!.disguiseBroken == false )) 1.0 else 0.0,
             true
         )
         val playerCurrentHp = ActorCurrentHp(
             playerSide.pokemon.currentHp,
             if (playerSide.pokemon.volatileStatus.contains("substitute")) playerSide.pokemon.stats.hp/4 else 0.0,
+            if (playerSide.pokemon.ability == "disguise" && (battleTracker.pokemons[playerSide.pokemon.uuid] == null || battleTracker.pokemons[playerSide.pokemon.uuid]!!.disguiseBroken == false )) 1.0 else 0.0,
             false
         )
+
         // substitute start 1v1 simulation with full life
         // TODO eventually : find the information about substitute currentLife and set substituteHp correctly
 
@@ -545,7 +549,17 @@ class StrongBattleAI(skill: Int) : BattleAI {
                 currentHp.substitute -= move.value.damage
                 if (currentHp.substitute < 0 && move.move.name in (multiHitMovesStandard + multiHitMoves2Hits + multiHitMoves3Hits))
                     currentHp.pokemon += currentHp.substitute
-            } else currentHp.pokemon -= move.value.damage
+            } else if (currentHp.disguise > 0) {
+                currentHp.disguise -= move.value.damage
+                if (currentHp.disguise < 0) { // we can be more precise than with a substitute so we are
+                    when (move.move.name) {
+                        in multiHitMovesStandard -> currentHp.pokemon -= 4.0*move.value.damage/5.0 // approximation supposing attacker has skill link or dice
+                        in multiHitMoves2Hits -> currentHp.pokemon -= move.value.damage/2.0
+                        in multiHitMoves3Hits -> currentHp.pokemon -= 2.0*move.value.damage/3.0
+                    }
+                }
+            }
+            else currentHp.pokemon -= move.value.damage
 
             if (fullLifeBeforeDamage && currentHp.pokemon <= 0.0 && (defender.ability == "sturdy" || defender.item == "focussash") && move.move.name !in (multiHitMovesStandard + multiHitMoves2Hits + multiHitMoves3Hits))
                 currentHp.pokemon = 1.0
@@ -800,20 +814,14 @@ class StrongBattleAI(skill: Int) : BattleAI {
                     // if entry hazard of a type isn't on field, we put it
                     in entryHazards -> {
                         if (expectedTurnsToPlay >= 1) {
-                            if (canUseStatusMove(field, move, attackerSide.pokemon, defenderSide.pokemon)) {
+                            if (canUseStatusMove(field, move, attackerSide.pokemon, defenderSide.pokemon) && !pokemonHasMove(defenderSide.pokemon, antiHazardsMoves)) {
                                 when (move.name) {
-                                    in listOf(
-                                        "stealthrock",
-                                        "stoneaxe"
-                                    ) -> if (!defenderSide.hazards.contains("stealthrock")) return move
-
-                                    in listOf(
-                                        "spikes",
-                                        "ceaselessedge"
-                                    ) -> if (defenderSide.hazards.count { it == "spikes" } < 3) return move
-
-                                    "stickyweb" -> if (!defenderSide.hazards.contains("stealthrock")) return move
-                                    "toxicspikes" -> if (defenderSide.hazards.count { it == "toxicspikes" } < 2) return move
+                                    "stealthrock" -> if (!defenderSide.hazards.contains("stealthrock") && !pokemonHasMove(defenderSide.pokemon, antiHazardsMoves)) return move
+                                    "stoneaxe" -> if (!defenderSide.hazards.contains("stealthrock") && !pokemonHasMove(defenderSide.pokemon, antiHazardsMoves)) return move
+                                    "spikes" -> if (defenderSide.hazards.count { it == "spikes" } < 3) return move
+                                    "ceaselessedge" -> if (defenderSide.hazards.count { it == "spikes" } < 3) return move
+                                    "stickyweb" -> if (!defenderSide.hazards.contains("stickyweb") && !pokemonHasMove(defenderSide.pokemon, antiHazardsMoves)) return move
+                                    "toxicspikes" -> if (defenderSide.hazards.count { it == "toxicspikes" } < 2 && !pokemonHasMove(defenderSide.pokemon, antiHazardsMoves)) return move
                                 }
                             }
                         }
@@ -1267,6 +1275,7 @@ class StrongBattleAI(skill: Int) : BattleAI {
     private fun getMovePower(attackerSide: Side, defenderSide: Side, move: ActivePokemonMove, attackerBoostedStats:PokemonStats, defenderBoostedStats:PokemonStats): Double {
         // move power
         val movePower:Double = when {
+            move.name == "ragingfist" -> 50.0 + 50.0*getNumberOfHitTaken(attackerSide.pokemon)
             move.name == "lastrespects" -> 50.0 + 50.0*getDeadAlliesNumber(attackerSide)
             move.name in listOf("return", "frustration") -> hapinessPower
             move.name == "magnitude" -> 71.0
@@ -1588,6 +1597,7 @@ class StrongBattleAI(skill: Int) : BattleAI {
             in listOf("multiscale", "shadowShield") -> if (defenderSide.pokemon.currentHp.toDouble() == defenderSide.pokemon.stats.hp) multiplier *= 0.5
         }
         when (move.name) {
+            "fishiousrend" -> if (selectedIsQuicker(field, attackerSide, defenderSide) || opponentMove == null) multiplier *= 2.0
             "synchronoise" -> if (attackerSide.pokemon.types.intersect(defenderSide.pokemon.types).isEmpty()) multiplier *= 0.0
             "acrobatics" -> if (attackerSide.pokemon.item == "") multiplier*= 2.0
             "knockoff" -> if (defenderSide.pokemon.item != "") multiplier *= 1.5
@@ -1806,11 +1816,19 @@ class StrongBattleAI(skill: Int) : BattleAI {
         return turnsToPlay
     }
 
+    private fun getNumberOfHitTaken(pokemon: ActivePokemon): Int {
+        if (battleTracker.pokemons[pokemon.uuid] != null) return battleTracker.pokemons[pokemon.uuid]!!.takenHit
+        else return 0
+    }
+
     private fun xChanceOn100(x: Int): Boolean {
         return Random.nextDouble() < x / 100.0
     }
 
     private fun updateBattleTracker(battle: PokemonBattle) {
+
+        var seenP1Adamage = false
+        var seenP2Adamage = false
 
         var uuid: String
         var newItem: String
@@ -1826,6 +1844,8 @@ class StrongBattleAI(skill: Int) : BattleAI {
         val abilityLines = logLines.filter { it.contains("-ability") }
         val transformLines = logLines.filter { it.contains("-transform") }
         val faintLines = logLines.filter { it.contains("|faint|") }
+        var disguiseBrokenLines = logLines.filter { it.contains(Regex("\\|detailschange\\|.*Mimikyu-Busted")) }
+        var damageTakenLines = logLines.filter { it.contains("-damage") }
 
         endItemLines.forEach {
             uuid = it.split('|')[2].split(":")[1].trim()
@@ -1860,11 +1880,28 @@ class StrongBattleAI(skill: Int) : BattleAI {
             if (faintPlayer == "p1a") battleTracker.deathNumber.player++
             else if (faintPlayer == "p2a") battleTracker.deathNumber.npc++
         }
+
+        disguiseBrokenLines.forEach {
+            uuid = it.split('|')[2].split(":")[1].trim()
+            updateBattleTrackerLine(UUID.fromString(uuid),ResetProperty.DISGUISEBROKEN, "", battle)
+        }
+
+        damageTakenLines.forEach {
+            uuid = it.split('|')[2].split(":")[1].trim()
+            if (it.contains("p1a") && !seenP1Adamage) {
+                updateBattleTrackerLine(UUID.fromString(uuid),ResetProperty.TAKENHIT, "", battle)
+                seenP1Adamage = true
+            }
+            if (it.contains("p2a") && !seenP2Adamage) {
+                updateBattleTrackerLine(UUID.fromString(uuid),ResetProperty.TAKENHIT, "", battle)
+                seenP2Adamage = true
+            }
+        }
     }
 
     private fun updateBattleTrackerLine(uuid: UUID, property: ResetProperty, value: String, battle: PokemonBattle) {
         if (battleTracker.pokemons[uuid] == null)
-            battleTracker.pokemons[uuid] = PokemonTracker(null, null, null)
+            battleTracker.pokemons[uuid] = PokemonTracker(null, null, null, false, false, 0)
         when (property) {
             ResetProperty.ITEM -> battleTracker.pokemons[uuid]!!.item = value
             ResetProperty.ABILITY -> battleTracker.pokemons[uuid]!!.ability = value
@@ -1883,7 +1920,8 @@ class StrongBattleAI(skill: Int) : BattleAI {
                 }
                 battleTracker.pokemons[uuid]!!.transform = copiedPokemon
             }
-
+            ResetProperty.DISGUISEBROKEN -> battleTracker.pokemons[uuid]!!.disguiseBroken = true
+            ResetProperty.TAKENHIT -> battleTracker.pokemons[uuid]!!.takenHit++
         }
     }
 
@@ -1993,6 +2031,13 @@ class StrongBattleAI(skill: Int) : BattleAI {
             if (availableSwitches.isNotEmpty()) return availableSwitches.random()
         }
 
+        // palafin switch
+        if (npcSide.pokemon.ability == "zerotohero" && (battleTracker.pokemons[npcSide.pokemon.uuid] == null || !battleTracker.pokemons[npcSide.pokemon.uuid]!!.isAHero)) {
+            availableSwitches = standardSwitches(field, playerSide, npcSide, fightResult)
+            if (availableSwitches.isNotEmpty()) return availableSwitches.random()
+            else if (npcSide.team.isNotEmpty()) return Switch(npcSide.team.random().uuid, null, false) // we switch anyway, we don't want to keep a zero palafin active
+        }
+
         // shed tail move
         if (pokemonHasMove(npcSide.pokemon, "shedtail")) {
             availableSwitches = shedTailSwitches(field, playerSide, npcSide, fightResult)
@@ -2018,6 +2063,9 @@ class StrongBattleAI(skill: Int) : BattleAI {
     private fun emptySlotSwitchStrategy(field: Field, playerSide: Side, npcSide: Side): UUID {
         val availableSwitches = mutableListOf<UUID>()
 
+        // if opponent pokemon is dead, we don't calculate anything and just send a random pokemon
+        if (playerSide.pokemon.name == "")
+            return npcSide.team.random().uuid
 
         for (pokemon in npcSide.team) {
             if (get1v1ResultWithSwitch(field, playerSide, npcSide, pokemon, null, null).npcWins)
@@ -2075,6 +2123,10 @@ class StrongBattleAI(skill: Int) : BattleAI {
                 } else return SwitchActionResponse(emptySlotSwitchStrategy(battleState.field, battleState.playerSide, battleState.npcSide))
             }
 
+            println(battle.battleLog)
+            println(battleState.npcSide.pokemon.stats.toString())
+            println(activeBattlePokemon.battlePokemon?.statChanges.toString())
+
             // we should get to here only if we have a pokemon on each side of the board
             val fightResult = get1v1Result(battleState.field, battleState.playerSide, battleState.npcSide)
             val utilityMove = usableUtilityMove(battleState.field, battleState.npcSide, battleState.playerSide, fightResult.turnsToKillNpc, fightResult.turnsToKillPlayer, fightResult.npcWins, fightResult.playerMostProbableMove, battleTracker.previousMoves.npc, battleTracker.previousMoves.player)
@@ -2125,7 +2177,10 @@ class StrongBattleAI(skill: Int) : BattleAI {
 
             // we shouldn't get there. If you do, upgrade this shitty AI and make it better !!
             println("This AI is shit and couldn't know what to do")
-            return PassActionResponse
+            /* list of scenarios reaching this part of the code :
+            - the pokemon does not have any usable offensive move */
+            return chooseMove(getMoveFromShowdownMoveSet(moveset!!, battleState.npcSide.pokemon.moveSet.random().name)!!, activeBattlePokemon)
+            //return PassActionResponse
 
 
             // en gros pour switch faut return SwitchActionResponse(switchTo.uuid)

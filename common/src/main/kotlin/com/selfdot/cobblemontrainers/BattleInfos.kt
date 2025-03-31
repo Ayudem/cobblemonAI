@@ -103,6 +103,7 @@ data class BattleMovesInfos(
 data class ActorCurrentHp(
     var pokemon:Double,
     var substitute: Double,
+    var disguise: Double,
     val isNpc: Boolean
 )
 
@@ -123,7 +124,10 @@ data class BattleTracker(
 data class PokemonTracker(
     var item: String?,
     var ability: String?,
-    var transform: Transform?
+    var transform: Transform?,
+    var disguiseBroken: Boolean,
+    var isAHero: Boolean,
+    var takenHit: Int,
 )
 
 data class Transform(
@@ -145,7 +149,9 @@ data class Switch(
 enum class ResetProperty {
     ITEM,
     ABILITY,
-    TRANSFORM
+    TRANSFORM,
+    DISGUISEBROKEN,
+    TAKENHIT
 }
 
 enum class SideOwner {
