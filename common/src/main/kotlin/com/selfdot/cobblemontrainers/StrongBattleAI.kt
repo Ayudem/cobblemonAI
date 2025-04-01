@@ -701,38 +701,56 @@ class StrongBattleAI(skill: Int) : BattleAI {
         var flinch = 0.0
 
         for (move in getEnabledMoves(attackerSide.pokemon.moveSet)) {
-            // if we have a move with damage dependings on opponent move (like counter), we recalculate their most probable move here
-            if (!ignoreOpponentMove && opponentProbableMove == null) {
-                opponentProbableMove = mostProbableOffensiveMove(field, defenderSide, attackerSide, defenderCurrentHp, attackerCurrentHp, !attackerIsQuicker, true).usedMove
-                flinch = when (opponentProbableMove.move.name) {
-                    in flinch30Moves -> 0.3
-                    in flinch20Moves -> 0.2
-                    in flinch10Moves -> 0.1
-                    else -> 0.0
+            if (!move.disabled) {
+                // if we have a move with damage dependings on opponent move (like counter), we recalculate their most probable move here
+                if (!ignoreOpponentMove && opponentProbableMove == null) {
+                    opponentProbableMove = mostProbableOffensiveMove(
+                        field,
+                        defenderSide,
+                        attackerSide,
+                        defenderCurrentHp,
+                        attackerCurrentHp,
+                        !attackerIsQuicker,
+                        true
+                    ).usedMove
+                    flinch = when (opponentProbableMove.move.name) {
+                        in flinch30Moves -> 0.3
+                        in flinch20Moves -> 0.2
+                        in flinch10Moves -> 0.1
+                        else -> 0.0
+                    }
                 }
-            }
 
-            damageHeal = damageAndHealDoneByMove(field, attackerSide, defenderSide, move, attackerIsQuicker, flinch, opponentProbableMove)
+                damageHeal = damageAndHealDoneByMove(
+                    field,
+                    attackerSide,
+                    defenderSide,
+                    move,
+                    attackerIsQuicker,
+                    flinch,
+                    opponentProbableMove
+                )
 
-            // if we find a killing move with priority, we stop immediatly
-            if ((attackerIsQuicker || move.priority > 0) && damageHeal.damage >= defenderCurrentHp) {
-                killerMoves.add(move)
-                highestDamageHeal = DamageHeal(damageHeal.damage, damageHeal.heal)
-                bestMove = move
-            }
-
-            if (damageHeal.heal > attackerSide.pokemon.stats.hp - attackerCurrentHp)
-                effectiveHeal = attackerSide.pokemon.stats.hp - attackerCurrentHp
-            else
-                effectiveHeal = damageHeal.heal
-
-            if (damageHeal.damage + effectiveHeal > 0.0) damagingMoves.add(move)
-            else notDamagingMoves.add(move)
-
-            if (damageHeal.damage+effectiveHeal>=highestDamageHeal.damage+highestDamageHeal.heal) {
-                if (killerMoves.isEmpty()) { // if no killer move found, highest damage is the best move
-                    highestDamageHeal = DamageHeal(damageHeal.damage, effectiveHeal)
+                // if we find a killing move with priority, we stop immediatly
+                if ((attackerIsQuicker || move.priority > 0) && damageHeal.damage >= defenderCurrentHp) {
+                    killerMoves.add(move)
+                    highestDamageHeal = DamageHeal(damageHeal.damage, damageHeal.heal)
                     bestMove = move
+                }
+
+                if (damageHeal.heal > attackerSide.pokemon.stats.hp - attackerCurrentHp)
+                    effectiveHeal = attackerSide.pokemon.stats.hp - attackerCurrentHp
+                else
+                    effectiveHeal = damageHeal.heal
+
+                if (damageHeal.damage + effectiveHeal > 0.0) damagingMoves.add(move)
+                else notDamagingMoves.add(move)
+
+                if (damageHeal.damage + effectiveHeal >= highestDamageHeal.damage + highestDamageHeal.heal) {
+                    if (killerMoves.isEmpty()) { // if no killer move found, highest damage is the best move
+                        highestDamageHeal = DamageHeal(damageHeal.damage, effectiveHeal)
+                        bestMove = move
+                    }
                 }
             }
         }
@@ -906,7 +924,7 @@ class StrongBattleAI(skill: Int) : BattleAI {
                     }
                     // we use a status move if opponent doesn't have status
                     in statusMoves.keys.mapNotNull { it?.name } -> {
-                        if (expectedTurnsToPlay >= 2) {
+                        if (expectedTurnsToPlay >= 2 && xChanceOn100(80)) {
                             if (defenderSide.pokemon.status == null && canUseStatusMove(field, move, attackerSide.pokemon, defenderSide.pokemon)) {
                                 when (statusMoves[Moves.getByName(move.name)]) {
                                     Statuses.BURN.showdownName -> if (defenderSide.pokemon.ability !in listOf("waterveil","thermalexchange") && !pokemonHasType(defenderSide.pokemon, ElementalTypes.FIRE)) return move
@@ -914,6 +932,7 @@ class StrongBattleAI(skill: Int) : BattleAI {
                                         if (defenderSide.pokemon.ability != "limber" && !pokemonHasType(defenderSide.pokemon, ElementalTypes.ELECTRIC)) {
                                             when (move.name) {
                                                 "stunpowder" -> if (!isPowderProtected(defenderSide.pokemon)) return move
+                                                in listOf("thunderwave", "nuzzle") -> if (!pokemonHasType(defenderSide.pokemon, ElementalTypes.GROUND)) return move
                                                 else -> return move
                                             }
                                         }
@@ -940,7 +959,7 @@ class StrongBattleAI(skill: Int) : BattleAI {
                     }
                     // we use a volatile status move if opponent doesn't already have the effect
                     in volatileStatusMoves.keys.mapNotNull { it?.name } -> {
-                        if (expectedTurnsToPlay >= 2) {
+                        if (expectedTurnsToPlay >= 2 && xChanceOn100(80)) {
                             if (canUseStatusMove(field, move, attackerSide.pokemon, defenderSide.pokemon)) {
                                 when (statusMoves[Moves.getByName(move.name)]) {
                                     "confusion" -> if (!(defenderSide.pokemon.volatileStatus.contains("confusion"))) {
@@ -2015,7 +2034,7 @@ class StrongBattleAI(skill: Int) : BattleAI {
         else standardSwitches(field, npcSide, playerSide, fightResult)
     }
 
-    private fun switchStrategy(field: Field, playerSide: Side, npcSide: Side, fightResult: Battle1v1State): Switch {
+    private fun switchStrategy(field: Field, playerSide: Side, npcSide: Side, fightResult: Battle1v1State, forceSwitch: Boolean): Switch {
         var availableSwitches:List<Switch>
         var move:ActivePokemonMove? = null
 
@@ -2057,7 +2076,8 @@ class StrongBattleAI(skill: Int) : BattleAI {
         }
 
         // no relevant switch found
-        return Switch(null, null, false)
+        return if (forceSwitch && npcSide.team.isNotEmpty()) Switch(npcSide.team.random().uuid, null, false)
+        else Switch(null, null, false)
     }
 
     private fun emptySlotSwitchStrategy(field: Field, playerSide: Side, npcSide: Side): UUID {
@@ -2123,14 +2143,14 @@ class StrongBattleAI(skill: Int) : BattleAI {
                 } else return SwitchActionResponse(emptySlotSwitchStrategy(battleState.field, battleState.playerSide, battleState.npcSide))
             }
 
-            println(battle.battleLog)
-            println(battleState.npcSide.pokemon.stats.toString())
-            println(activeBattlePokemon.battlePokemon?.statChanges.toString())
+            //println(battle.battleLog)
+            //println(battleState.npcSide.pokemon.stats.toString())
+            //println(activeBattlePokemon.battlePokemon?.statChanges.toString())
 
             // we should get to here only if we have a pokemon on each side of the board
             val fightResult = get1v1Result(battleState.field, battleState.playerSide, battleState.npcSide)
             val utilityMove = usableUtilityMove(battleState.field, battleState.npcSide, battleState.playerSide, fightResult.turnsToKillNpc, fightResult.turnsToKillPlayer, fightResult.npcWins, fightResult.playerMostProbableMove, battleTracker.previousMoves.npc, battleTracker.previousMoves.player)
-            val chosenSwitch = switchStrategy(battleState.field, battleState.playerSide, battleState.npcSide, fightResult)
+            val chosenSwitch = switchStrategy(battleState.field, battleState.playerSide, battleState.npcSide, fightResult, false)
             updatePreviousPokemon(battleState.playerSide.pokemon, battleState.npcSide.pokemon)
 
             // if we can kill immediatly
@@ -2175,11 +2195,11 @@ class StrongBattleAI(skill: Int) : BattleAI {
                     return chooseMove(getMoveFromShowdownMoveSet(moveset!!, fightResult.npcMovesInfos.damagingMoves.random().name)!!, activeBattlePokemon)
             }
 
-            // we shouldn't get there. If you do, upgrade this shitty AI and make it better !!
             println("This AI is shit and couldn't know what to do")
-            /* list of scenarios reaching this part of the code :
-            - the pokemon does not have any usable offensive move */
-            return chooseMove(getMoveFromShowdownMoveSet(moveset!!, battleState.npcSide.pokemon.moveSet.random().name)!!, activeBattlePokemon)
+            /* if we get here, the pokemon has no more useful move, we force a switch */
+            val nothingToDoSwitch = switchStrategy(battleState.field, battleState.playerSide, battleState.npcSide, fightResult, true)
+            return if (nothingToDoSwitch.uuid != null) SwitchActionResponse(nothingToDoSwitch.uuid!!)
+            else chooseMove(getMoveFromShowdownMoveSet(moveset!!, battleState.npcSide.pokemon.moveSet.random().name)!!, activeBattlePokemon)
             //return PassActionResponse
 
 
