@@ -108,8 +108,8 @@ data class ActorCurrentHp(
 )
 
 data class PreviousMoves(
-    var player: ActivePokemonMove?,
-    var npc: ActivePokemonMove?
+    var player: String?,
+    var npc: String?
 )
 
 data class BattleTracker(

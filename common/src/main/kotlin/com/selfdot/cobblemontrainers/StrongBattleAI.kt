@@ -235,6 +235,7 @@ val boostFromMoves: Map<String, Map<Stat, Int>> = mapOf(
 
 class StrongBattleAI(skill: Int) : BattleAI {
 
+    private val selfKillMoves = listOf("selfdestruct", "explosion", "mistyexplosion", "memento", "finalgambit", "healingwish", "lunardance")
     private val offensiveSwitchMoves = listOf("uturn", "voltswitch", "flipturn")
     private val switchMoves = listOf("uturn", "voltswitch", "flipturn", "batonpass", "partingshot", "teleport", "shedtail", "chillyreception")
     private val flinch30Moves = listOf("airslash", "astonish", "bite", "doubleironbash", "headbutt", "heartstamp", "iciclecrash", "ironhead", "rockslide", "rollingkick", "skyattack", "stomp", "zingzap", "steamroller", "snore")
@@ -293,21 +294,42 @@ class StrongBattleAI(skill: Int) : BattleAI {
 
     // get all used information about a pokemon moveset
     private fun getActivePokemonMoveSet(pokemon: Pokemon?, request: ShowdownActionRequest?): List<ActivePokemonMove> {
-        if (pokemon != null) {
-            return pokemon.moveSet.mapIndexed { index, move ->
-                val disabled = request?.active?.getOrNull(0)?.moves?.getOrNull(index)?.disabled ?: false
-                ActivePokemonMove(
-                    move.name,
-                    move.power,
-                    move.type,
-                    move.damageCategory,
-                    move.accuracy,
-                    move.currentPp,
-                    move.template.priority,
-                    disabled
-                )
+        val moveSet = mutableListOf<ActivePokemonMove>()
+
+        // request is not null only if it's active pokemon.
+        // If something like encore or choice item is used, other moves are disabled, but if pokemon used a move like outrage, only this move is kept in moveset during the effect
+        if (pokemon?.moveSet != null) {
+            pokemon.moveSet.forEach { pokemonMove ->
+                if (request != null) {
+                    request.active?.getOrNull(0)?.moves?.forEach{ requestMove ->
+                        if (requestMove.id == pokemonMove.name) {
+                            moveSet.add(ActivePokemonMove(
+                                pokemonMove.name,
+                                pokemonMove.power,
+                                pokemonMove.type,
+                                pokemonMove.damageCategory,
+                                pokemonMove.accuracy,
+                                pokemonMove.currentPp,
+                                pokemonMove.template.priority,
+                                requestMove.disabled
+                            ))
+                        }
+                    }
+                } else {
+                    moveSet.add(ActivePokemonMove(
+                        pokemonMove.name,
+                        pokemonMove.power,
+                        pokemonMove.type,
+                        pokemonMove.damageCategory,
+                        pokemonMove.accuracy,
+                        pokemonMove.currentPp,
+                        pokemonMove.template.priority,
+                        false
+                    ))
+                }
             }
-        } else return emptyList()
+        }
+        return moveSet
     }
 
     private fun getStatsBoosts(contextManager: ContextManager): PokemonStatBoosts {
@@ -701,7 +723,7 @@ class StrongBattleAI(skill: Int) : BattleAI {
         var flinch = 0.0
 
         for (move in getEnabledMoves(attackerSide.pokemon.moveSet)) {
-            if (!move.disabled) {
+            if (!move.disabled && move.currentPP > 0) {
                 // if we have a move with damage dependings on opponent move (like counter), we recalculate their most probable move here
                 if (!ignoreOpponentMove && opponentProbableMove == null) {
                     opponentProbableMove = mostProbableOffensiveMove(
@@ -738,18 +760,15 @@ class StrongBattleAI(skill: Int) : BattleAI {
                     bestMove = move
                 }
 
-                if (damageHeal.heal > attackerSide.pokemon.stats.hp - attackerCurrentHp)
-                    effectiveHeal = attackerSide.pokemon.stats.hp - attackerCurrentHp
-                else
-                    effectiveHeal = damageHeal.heal
+                effectiveHeal = effectiveHeal(damageHeal.heal, attackerSide.pokemon.stats.hp, attackerCurrentHp)
 
-                if (damageHeal.damage + effectiveHeal > 0.0) damagingMoves.add(move)
+                if (damageHeal.damage + effectiveHeal > 0.0 && move.name !in selfKillMoves) damagingMoves.add(move)
                 else notDamagingMoves.add(move)
 
                 if (damageHeal.damage + effectiveHeal >= highestDamageHeal.damage + highestDamageHeal.heal) {
                     if (killerMoves.isEmpty()) { // if no killer move found, highest damage is the best move
                         highestDamageHeal = DamageHeal(damageHeal.damage, effectiveHeal)
-                        bestMove = move
+                        bestMove = move // should we let this be explosion if it doesn't kill ?
                     }
                 }
             }
@@ -767,29 +786,30 @@ class StrongBattleAI(skill: Int) : BattleAI {
 
     // looking for a relevant utility move before using an offensive move
     private fun usableUtilityMove(field: Field, attackerSide: Side, defenderSide: Side, attackerTurnsToLive: Int, defenderTurnsToLive: Int, attackerWins: Boolean, opponentMove: ActivePokemonMove, previousAttackerMove: ActivePokemonMove?, previousDefenderMove: ActivePokemonMove?): ActivePokemonMove? {
-        // TODO check number of heavy duty boots and ungrounded (and alive pokemon) on teams to mitigate usage of hazard and anti-hazard
-        // TODO check number of poison/steel/ungrounded opponents to mitigate usage of toxic spikes
-        // TODO usage of boost moves could be smarter (probably)
-
-        // TODO also : OMG organise this shit better, it's so unreadable !
+        // TODO : usable utility moves right now are checked in order of pokemon move list, if we have several boost moves, we should list them, then assign priorities, then use depending on priority
+        // TODO : we have a problem, sometimes the npc will try to boost themselves before switching even if they can't win the fight ever even with boosts, so they will spend useless time boosting then switch and loose turns
 
         val attackerResidualDamage = damageAndHealEndTurn(field, attackerSide.pokemon, defenderSide.pokemon)
-        var defenderResidualDamage = damageAndHealEndTurn(field, defenderSide.pokemon, attackerSide.pokemon)
+        val attackerEffectiveHeal = effectiveHeal(attackerResidualDamage.heal, attackerSide.pokemon.stats.hp, attackerSide.pokemon.currentHp)
+        val defenderResidualDamage = damageAndHealEndTurn(field, defenderSide.pokemon, attackerSide.pokemon)
+        val defenderEffectiveHeal = effectiveHeal(defenderResidualDamage.heal, defenderSide.pokemon.stats.hp, defenderSide.pokemon.currentHp)
         val expectedTurnsToPlay = expectedTurnsToPlay(attackerTurnsToLive, selectedIsQuicker(field, attackerSide, defenderSide))
 
         for (move in getEnabledMoves(attackerSide.pokemon.moveSet)) {
-            if (move.damageCategory == DamageCategories.STATUS || move.name in offensiveUtilityMoves) {
+            if ((move.damageCategory == DamageCategories.STATUS && attackerSide.pokemon.item !in choiceItems && !attackerSide.pokemon.volatileStatus.contains("encore")) || move.name in offensiveUtilityMoves) {
                 when (move.name) {
                     "fakeout" -> if (!pokemonHasType(defenderSide.pokemon, ElementalTypes.GHOST) && battleTracker.previousNpcPokemon != attackerSide.pokemon.uuid) return move
+
                     // we protect if opponent residual damagevalue is higher than our. we always protect if it's kingsshield
                     in protectMoves -> {
                         if (previousAttackerMove?.name !in protectMoves) {
                             if (move.name == "kingsshield") return move
                             if (previousAttackerMove?.name == "wish"
-                                || (defenderResidualDamage.damage - defenderResidualDamage.heal) > (attackerResidualDamage.damage - attackerResidualDamage.heal))
+                                || (defenderResidualDamage.damage - defenderEffectiveHeal) > (attackerResidualDamage.damage - attackerEffectiveHeal))
                                 return move
                         }
                     }
+
                     // if pokemon has anti-boost move, they use it when cumulative opponent boost is 2 or more
                     in antiBoostMoves -> {
                         if (defenderSide.pokemon.statBoosts.run { attack+specialAttack+defense+specialDefense+speed } >= 2.0) {
@@ -806,10 +826,15 @@ class StrongBattleAI(skill: Int) : BattleAI {
                             }
                         }
                     }
+
+                    "sleeptalk" -> if (expectedTurnsToPlay >= 2 && attackerSide.pokemon.status == "slp") return move
+
                     // we wish if previous move is not wish
+
                     "wish" -> if (previousAttackerMove?.name != "wish")
                         if (expectedTurnsToPlay >= 1)
                             return move
+
                     // we provoc if opponent has 2 status moves or more
                     "taunt" -> if (expectedTurnsToPlay >= 2) {
                         if (!defenderSide.pokemon.volatileStatus.contains("taunt")
@@ -817,6 +842,7 @@ class StrongBattleAI(skill: Int) : BattleAI {
                             && defenderSide.pokemon.moveSet.count { it.damageCategory == DamageCategories.STATUS} >= 2)
                             return move
                     }
+
                     // we encore if opponent has 1 status move or more, we use encore half of the time
                     // if we're quicker and opponent used a status move on previous turn, we use encore 90% of the time
                     "encore" -> if (expectedTurnsToPlay >= 2) {
@@ -829,21 +855,23 @@ class StrongBattleAI(skill: Int) : BattleAI {
                                 return move
                         }
                     }
+
                     // if entry hazard of a type isn't on field, we put it
                     in entryHazards -> {
                         if (expectedTurnsToPlay >= 1) {
                             if (canUseStatusMove(field, move, attackerSide.pokemon, defenderSide.pokemon) && !pokemonHasMove(defenderSide.pokemon, antiHazardsMoves)) {
                                 when (move.name) {
-                                    "stealthrock" -> if (!defenderSide.hazards.contains("stealthrock") && !pokemonHasMove(defenderSide.pokemon, antiHazardsMoves)) return move
-                                    "stoneaxe" -> if (!defenderSide.hazards.contains("stealthrock") && !pokemonHasMove(defenderSide.pokemon, antiHazardsMoves)) return move
-                                    "spikes" -> if (defenderSide.hazards.count { it == "spikes" } < 3) return move
+                                    "stealthrock" -> if (shouldUseStealthRock(field, attackerSide, defenderSide) && !pokemonHasMove(defenderSide.pokemon, antiHazardsMoves)) return move
+                                    "stoneaxe" -> if (!defenderSide.hazards.contains("stealthrock")) return move
+                                    "spikes" -> if (shouldUseSpikes(field, attackerSide, defenderSide) && !pokemonHasMove(defenderSide.pokemon, antiHazardsMoves)) return move
                                     "ceaselessedge" -> if (defenderSide.hazards.count { it == "spikes" } < 3) return move
-                                    "stickyweb" -> if (!defenderSide.hazards.contains("stickyweb") && !pokemonHasMove(defenderSide.pokemon, antiHazardsMoves)) return move
-                                    "toxicspikes" -> if (defenderSide.hazards.count { it == "toxicspikes" } < 2 && !pokemonHasMove(defenderSide.pokemon, antiHazardsMoves)) return move
+                                    "stickyweb" -> if (shouldUseStickyWeb(field, attackerSide, defenderSide) && !pokemonHasMove(defenderSide.pokemon, antiHazardsMoves)) return move
+                                    "toxicspikes" -> if (shouldUseToxicSpikes(field, attackerSide, defenderSide) && !pokemonHasMove(defenderSide.pokemon, antiHazardsMoves)) return move
                                 }
                             }
                         }
                     }
+
                     // we setup screens if they're not setup
                     in screenMoves -> {
                         if (expectedTurnsToPlay >= 1) {
@@ -854,6 +882,7 @@ class StrongBattleAI(skill: Int) : BattleAI {
                             }
                         }
                     }
+
                     // if hazards are on attacker side, he try to remove them
                     in antiHazardsMoves -> {
                         if (expectedTurnsToPlay >= 1) {
@@ -865,6 +894,7 @@ class StrongBattleAI(skill: Int) : BattleAI {
                             }
                         }
                     }
+
                     // we heal if it's our last move before dying and hp is not full
                     in selfRecoveryMoves -> {
                         if (expectedTurnsToPlay >= 1) {
@@ -878,6 +908,7 @@ class StrongBattleAI(skill: Int) : BattleAI {
                             }
                         }
                     }
+
                     // we substitute if opponent has status moves or we can sometimes try to substitute if we win fight (because opponent could switch)
                     "substitute" -> {
                         if (expectedTurnsToPlay >= 2) {
@@ -898,12 +929,14 @@ class StrongBattleAI(skill: Int) : BattleAI {
                             }
                         }
                     }
+
                     // we healing wish if it's our last move before dying and hp is not full
                     in listOf("healingwish", "lunardance") -> {
                         if (lastMoveBeforeDying(field, attackerSide, defenderSide, attackerTurnsToLive, move, opponentMove)
                                 && attackerSide.pokemon.currentHp < attackerSide.pokemon.stats.hp)
                                 return move
                     }
+
                     // if opponent has an item, we try to remove/exchange it
                     // we suppose trick/switcheroo are used to give a scarf
                     in itemManipulationMoves -> {
@@ -922,6 +955,7 @@ class StrongBattleAI(skill: Int) : BattleAI {
                             }
                         }
                     }
+
                     // we use a status move if opponent doesn't have status
                     in statusMoves.keys.mapNotNull { it?.name } -> {
                         if (expectedTurnsToPlay >= 2 && xChanceOn100(80)) {
@@ -957,6 +991,7 @@ class StrongBattleAI(skill: Int) : BattleAI {
                             }
                         }
                     }
+
                     // we use a volatile status move if opponent doesn't already have the effect
                     in volatileStatusMoves.keys.mapNotNull { it?.name } -> {
                         if (expectedTurnsToPlay >= 2 && xChanceOn100(80)) {
@@ -975,52 +1010,55 @@ class StrongBattleAI(skill: Int) : BattleAI {
                             }
                         }
                     }
+
                     // we boost speed if we're slower, else we boost while we have 2 less boosts than the opponent in a given stat/counterstat (like attack vs defense)
-                    // kind of simplistic for now, maybe I'll try to make it better if I have another idea
+                    // if we're already boosted, the higher boost we have, the lower chance we have to boost more
                     // TODO handle dodge and accuracy boosts
                     in boostFromMoves.keys -> {
                         if (expectedTurnsToPlay >= 2) {
                             if (canUseBoostMove(move, attackerSide.pokemon)) {
-                                if (attackerTurnsToLive > 1) {
-                                    if (boostCanGoHigher(attackerSide.pokemon, 6)) {
-                                        if (attackerTurnsToLive >= turnAliveToBoost) {
-                                            if (pokemonHasMove(defenderSide.pokemon, antiBoostMoves)) {
-                                                if (xChanceOn100(50)) return move
-                                            }
-                                            return move
+                                val chanceToBoost = when {
+                                    boostIsLower(attackerSide.pokemon,1) -> 100
+                                    boostIsLower(attackerSide.pokemon,2) -> 80
+                                    boostIsLower(attackerSide.pokemon,4) -> 50
+                                    boostIsLower(attackerSide.pokemon,6) -> 25
+                                    else -> 0
+                                }
+                                if (xChanceOn100(chanceToBoost)) {
+                                    if (attackerTurnsToLive >= turnAliveToBoost) {
+                                        if (pokemonHasMove(defenderSide.pokemon, antiBoostMoves)) {
+                                            if (xChanceOn100(50)) return move
                                         }
-                                        if (move.name in boostFromMoves.filter { (_, statMap) -> statMap.containsKey(Stats.SPEED) }) {
-                                            if (!selectedIsQuicker(
-                                                    field,
-                                                    attackerSide,
-                                                    defenderSide
-                                                ) || attackerSide.pokemon.statBoosts.speed <= 0
-                                            ) return move
-                                        }
-                                        if (move.name in boostFromMoves.filter { (_, statMap) -> statMap.containsKey(Stats.ATTACK) }) {
-                                            if (attackerSide.pokemon.statBoosts.attack - defenderSide.pokemon.statBoosts.defense < 2) return move
-                                        }
-                                        if (move.name in boostFromMoves.filter { (_, statMap) -> statMap.containsKey(Stats.SPECIAL_ATTACK) }) {
-                                            if (attackerSide.pokemon.statBoosts.specialAttack - defenderSide.pokemon.statBoosts.specialDefense < 2) return move
-                                        }
-                                        if (move.name in boostFromMoves.filter { (_, statMap) -> statMap.containsKey(Stats.DEFENCE) }) {
-                                            if (attackerSide.pokemon.statBoosts.defense - defenderSide.pokemon.statBoosts.attack < 2) return move
-                                        }
-                                        if (move.name in boostFromMoves.filter { (_, statMap) -> statMap.containsKey(Stats.SPECIAL_DEFENCE) }) {
-                                            if (attackerSide.pokemon.statBoosts.specialDefense - defenderSide.pokemon.statBoosts.specialAttack < 2) return move
-                                        }
+                                        return move
+                                    }
+                                    if (move.name in boostFromMoves.filter { (_, statMap) -> statMap.containsKey(Stats.SPEED) }) {
+                                        if (!selectedIsQuicker(field, attackerSide, defenderSide) || attackerSide.pokemon.statBoosts.speed <= 0) return move
+                                    }
+                                    if (move.name in boostFromMoves.filter { (_, statMap) -> statMap.containsKey(Stats.ATTACK) }) {
+                                        if (attackerSide.pokemon.statBoosts.attack - defenderSide.pokemon.statBoosts.defense < 2) return move
+                                    }
+                                    if (move.name in boostFromMoves.filter { (_, statMap) -> statMap.containsKey(Stats.SPECIAL_ATTACK) }) {
+                                        if (attackerSide.pokemon.statBoosts.specialAttack - defenderSide.pokemon.statBoosts.specialDefense < 2) return move
+                                    }
+                                    if (move.name in boostFromMoves.filter { (_, statMap) -> statMap.containsKey(Stats.DEFENCE) }) {
+                                        if (attackerSide.pokemon.statBoosts.defense - defenderSide.pokemon.statBoosts.attack < 2) return move
+                                    }
+                                    if (move.name in boostFromMoves.filter { (_, statMap) -> statMap.containsKey(Stats.SPECIAL_DEFENCE) }) {
+                                        if (attackerSide.pokemon.statBoosts.specialDefense - defenderSide.pokemon.statBoosts.specialAttack < 2) return move
                                     }
                                 }
                             }
                         }
                     }
+
                     // just for the lvl 5 battle against rival
                     // TODO just done for fun, would be better to extend it to usage of any unboost move
-                    in babyUnboostMove -> if (boostCanGoHigher(attackerSide.pokemon, 4)) {
+                    in babyUnboostMove -> if (boostIsLower(attackerSide.pokemon, 4)) {
                         if (expectedTurnsToPlay >= 2) {
                             if (attackerSide.pokemon.statBoosts.attack + attackerSide.pokemon.statBoosts.defense - defenderSide.pokemon.statBoosts.attack - defenderSide.pokemon.statBoosts.defense < 1) return move
                         }
                     }
+
                     // we destiny bond 80% of the time if we're gonna die
                     "destinybond" -> {
                         if (lastMoveBeforeDying(field, attackerSide, defenderSide, attackerTurnsToLive, move, opponentMove) && previousAttackerMove?.name != "destinybond") {
@@ -1733,11 +1771,16 @@ class StrongBattleAI(skill: Int) : BattleAI {
         else return false
     }
 
-    private fun boostCanGoHigher(pokemon: ActivePokemon, maxBoost: Int): Boolean {
+    private fun boostIsLower(pokemon: ActivePokemon, maxBoost: Int): Boolean {
         if (pokemon.statBoosts.attack < maxBoost && pokemon.statBoosts.specialAttack < maxBoost && pokemon.statBoosts.defense < maxBoost && pokemon.statBoosts.specialDefense < maxBoost && pokemon.statBoosts.speed < maxBoost)
             return true
         else
             return false
+    }
+
+    private fun effectiveHeal(heal: Double, maxHp: Double, currentHp: Double): Double {
+        return if (heal > maxHp - currentHp) maxHp - currentHp
+        else heal
     }
 
     private fun getCumulatedBoosts(pokemon: ActivePokemon): Double {
@@ -1854,9 +1897,12 @@ class StrongBattleAI(skill: Int) : BattleAI {
         var newAbility: String
         var transformTarget: String
         var faintPlayer: String
+        var moveName: String
+        var actor:String
 
         val battleLogs = battle.battleLog
         val logLines = battleLogs[battleLogs.size - 2].lines()
+        val moveLines = logLines.filter { it.contains("|move|") }
         val endItemLines = logLines.filter { it.contains("-enditem") }
         val itemLines = logLines.filter { it.contains("-item") }
         val endAbilityLines = logLines.filter { it.contains("-endability") }
@@ -1865,6 +1911,15 @@ class StrongBattleAI(skill: Int) : BattleAI {
         val faintLines = logLines.filter { it.contains("|faint|") }
         var disguiseBrokenLines = logLines.filter { it.contains(Regex("\\|detailschange\\|.*Mimikyu-Busted")) }
         var damageTakenLines = logLines.filter { it.contains("-damage") }
+
+        battleTracker.previousMoves.npc = null
+        battleTracker.previousMoves.player = null
+        moveLines.forEach {
+            actor = it.split('|')[2].split(":")[0].trim()
+            moveName = it.split('|')[3].replace(" ","").lowercase()
+            if (actor == "p1a") battleTracker.previousMoves.player = moveName
+            else if (actor == "p2a") battleTracker.previousMoves.npc = moveName
+        }
 
         endItemLines.forEach {
             uuid = it.split('|')[2].split(":")[1].trim()
@@ -1895,9 +1950,9 @@ class StrongBattleAI(skill: Int) : BattleAI {
         }
 
         faintLines.forEach {
-            faintPlayer = it.split('|')[2].split(":")[0].trim()
-            if (faintPlayer == "p1a") battleTracker.deathNumber.player++
-            else if (faintPlayer == "p2a") battleTracker.deathNumber.npc++
+            actor = it.split('|')[2].split(":")[0].trim()
+            if (actor == "p1a") battleTracker.deathNumber.player++
+            else if (actor == "p2a") battleTracker.deathNumber.npc++
         }
 
         disguiseBrokenLines.forEach {
@@ -1948,6 +2003,13 @@ class StrongBattleAI(skill: Int) : BattleAI {
         // TODO: this shouldn't return null ever, can we return struggle instead ?
         for (move in moveset.moves) {
             if (move.id == name) return move
+        }
+        return null
+    }
+
+    private fun getActivePokemonMoveFromName(move: String?, pokemon: ActivePokemon): ActivePokemonMove? {
+        pokemon.moveSet.forEach{
+            if (move == it.name) return it
         }
         return null
     }
@@ -2115,12 +2177,80 @@ class StrongBattleAI(skill: Int) : BattleAI {
     }
 
     private fun destinyBondWarning(battle1v1State: Battle1v1State): Boolean {
-        if (battleTracker.previousMoves.player?.name == "destinybond" && !battle1v1State.npcIsQuicker) return true
-        else return false
+        return battleTracker.previousMoves.player == "destinybond" && battle1v1State.npcIsQuicker
     }
 
-    // old function definition
-    //override fun choose(request: ShowdownActionRequest, active: ActivePokemon, moves: List<MoveChoice>, canDynamax: Boolean, possibleMoves: List<Move>): ShowdownActionResponse {
+    private fun pokemonWeakness(pokemon: ActivePokemon, type: ElementalType): Double {
+        // named weakness but can also be a resistance
+        var weakness = 1.0
+        for (pokemonType in pokemon.types) {
+            weakness *= getDamageMultiplier(type, pokemonType, null)
+        }
+        return weakness
+    }
+
+    private fun shouldUseStealthRock(field: Field, attackerSide: Side, defenderSide: Side): Boolean {
+        var sturdyUsers = 0
+        var doubleRockWeakness = 0
+        var simpleRockWeakness = 0
+        var noBoots = 0
+
+        (defenderSide.team + listOf(defenderSide.pokemon)).forEach {
+            if (it.ability == "sturdy" || it.item == "focussash") sturdyUsers++
+            if (pokemonWeakness(it, ElementalTypes.ROCK) == 4.0 && it.item != "heavydutyboots") doubleRockWeakness++
+            if (pokemonWeakness(it, ElementalTypes.ROCK) == 2.0 && it.item != "heavydutyboots") simpleRockWeakness++
+            if (it.item != "heavydutyboots") noBoots++
+        }
+
+        return if (!defenderSide.hazards.contains("stealthrock") && (sturdyUsers >= 1 || doubleRockWeakness >= 1 || simpleRockWeakness >= 2 || noBoots >= 3)) true
+        else false
+    }
+
+    private fun shouldUseStickyWeb(field: Field, attackerSide: Side, defenderSide: Side): Boolean {
+        var quickerDefender = 0
+        (attackerSide.team + listOf(attackerSide.pokemon)).forEach { attacker ->
+            (defenderSide.team + listOf(defenderSide.pokemon)).forEach { defender ->
+                if (defender.stats.speed > attacker.stats.speed && defender.item != "heavydutyboots" && isGrounded(defender)) quickerDefender++
+            }
+        }
+        // not really sure if it's an acceptable value
+        return if (!defenderSide.hazards.contains("stickyweb") && quickerDefender >= 10) true
+        else false
+    }
+
+    private fun shouldUseSpikes(field: Field, attackerSide: Side, defenderSide: Side): Boolean {
+        var grounded = 0
+        var hazardRemover = 0
+
+        (defenderSide.team + listOf(defenderSide.pokemon)).forEach {
+            if (isGrounded(it) && it.item != "heavydutyboots") grounded++
+            if (pokemonHasMove(it, antiHazardsMoves)) hazardRemover++
+        }
+
+        if (defenderSide.hazards.count { it == "spikes" } < 1 && grounded >= 2) return true
+        if (hazardRemover == 0) {
+            if (defenderSide.hazards.count { it == "spikes" } < 2 && grounded >= 3) return true
+            if (defenderSide.hazards.count { it == "spikes" } < 3 && grounded >= 4) return true
+        }
+        return false
+    }
+
+    private fun shouldUseToxicSpikes(field: Field, attackerSide: Side, defenderSide: Side): Boolean {
+        var poisonPokemons = 0
+        var poisonable = 0
+        var hazardRemover = 0
+
+        (defenderSide.team + listOf(defenderSide.pokemon)).forEach {
+            if (isGrounded(it) && pokemonHasType(it, ElementalTypes.POISON)) poisonPokemons++
+            if (!isGrounded(it) && !pokemonHasType(it, ElementalTypes.POISON) && !pokemonHasType(it, ElementalTypes.STEEL) && it.item != "heavydutyboots") poisonable++
+            if (pokemonHasMove(it, antiHazardsMoves)) hazardRemover++
+        }
+
+        if (defenderSide.hazards.count { it == "toxicspikes" } < 1 && poisonPokemons <= 1 && poisonable >= 1) return true
+        if (hazardRemover == 0 && defenderSide.hazards.count { it == "toxicspikes" } < 2 && poisonPokemons == 0 && poisonable >= 1)  return true
+        return false
+    }
+
     override fun choose(activeBattlePokemon: ActiveBattlePokemon, moveset: ShowdownMoveset?, forceSwitch: Boolean): ShowdownActionResponse {
         try {
             // get the current battle and set it as a variable
@@ -2143,13 +2273,9 @@ class StrongBattleAI(skill: Int) : BattleAI {
                 } else return SwitchActionResponse(emptySlotSwitchStrategy(battleState.field, battleState.playerSide, battleState.npcSide))
             }
 
-            //println(battle.battleLog)
-            //println(battleState.npcSide.pokemon.stats.toString())
-            //println(activeBattlePokemon.battlePokemon?.statChanges.toString())
-
             // we should get to here only if we have a pokemon on each side of the board
             val fightResult = get1v1Result(battleState.field, battleState.playerSide, battleState.npcSide)
-            val utilityMove = usableUtilityMove(battleState.field, battleState.npcSide, battleState.playerSide, fightResult.turnsToKillNpc, fightResult.turnsToKillPlayer, fightResult.npcWins, fightResult.playerMostProbableMove, battleTracker.previousMoves.npc, battleTracker.previousMoves.player)
+            val utilityMove = usableUtilityMove(battleState.field, battleState.npcSide, battleState.playerSide, fightResult.turnsToKillNpc, fightResult.turnsToKillPlayer, fightResult.npcWins, fightResult.playerMostProbableMove, getActivePokemonMoveFromName(battleTracker.previousMoves.npc, battleState.npcSide.pokemon), getActivePokemonMoveFromName(battleTracker.previousMoves.player, battleState.playerSide.pokemon))
             val chosenSwitch = switchStrategy(battleState.field, battleState.playerSide, battleState.npcSide, fightResult, false)
             updatePreviousPokemon(battleState.playerSide.pokemon, battleState.npcSide.pokemon)
 
@@ -2218,7 +2344,9 @@ class StrongBattleAI(skill: Int) : BattleAI {
         }
     }
 
+    // target seems to be for 2v2, right now we don't need it
     private fun chooseMove(move: InBattleMove, activeBattlePokemon: ActiveBattlePokemon): MoveActionResponse {
+        if (move.disabled) return MoveActionResponse("struggle")
         val target = if (move.mustBeUsed()) null else move.target.targetList(activeBattlePokemon)
         if (target == null)
             return MoveActionResponse(move.id)
