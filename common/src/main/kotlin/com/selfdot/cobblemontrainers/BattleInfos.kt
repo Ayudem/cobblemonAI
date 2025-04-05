@@ -14,6 +14,10 @@ data class Field(
     val trickRoom:Boolean
 )
 
+data class PokemonTransformation(
+    val types: Iterable<ElementalType>,
+    val stats: PokemonStats
+)
 data class PokemonStats(
     val hp:Double,
     val attack:Double,
@@ -157,4 +161,9 @@ enum class ResetProperty {
 enum class SideOwner {
     PLAYER,
     NPC
+}
+
+enum class ParticularMoves {
+    STRUGGLE,
+    RECHARGE
 }

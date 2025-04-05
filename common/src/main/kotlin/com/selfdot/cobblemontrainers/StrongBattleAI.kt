@@ -10,6 +10,7 @@ package com.selfdot.cobblemontrainers
 
 import com.cobblemon.mod.common.CobblemonItems
 import com.cobblemon.mod.common.api.abilities.Abilities
+import com.cobblemon.mod.common.api.events.CobblemonEvents
 import com.cobblemon.mod.common.api.battles.interpreter.BattleContext
 import com.cobblemon.mod.common.api.battles.model.PokemonBattle
 import com.cobblemon.mod.common.api.battles.model.ai.BattleAI
@@ -17,6 +18,7 @@ import com.cobblemon.mod.common.api.moves.Move
 import com.cobblemon.mod.common.api.moves.MoveTemplate
 import com.cobblemon.mod.common.api.moves.Moves
 import com.cobblemon.mod.common.api.moves.categories.DamageCategories
+import com.cobblemon.mod.common.api.moves.categories.DamageCategory
 import com.cobblemon.mod.common.api.pokemon.stats.Stat
 import com.cobblemon.mod.common.api.pokemon.stats.Stats
 import com.cobblemon.mod.common.api.pokemon.status.Statuses
@@ -295,12 +297,18 @@ class StrongBattleAI(skill: Int) : BattleAI {
     // get all used information about a pokemon moveset
     private fun getActivePokemonMoveSet(pokemon: Pokemon?, request: ShowdownActionRequest?): List<ActivePokemonMove> {
         val moveSet = mutableListOf<ActivePokemonMove>()
-
         // request is not null only if it's active pokemon.
-        // If something like encore or choice item is used, other moves are disabled, but if pokemon used a move like outrage, only this move is kept in moveset during the effect
+        // We need to get the request because it contains the real available moveList and the disabled moves
         if (pokemon?.moveSet != null) {
+            if (request?.active?.getOrNull(0) != null) {
+                val forcedMove = findForcedMove(request.active!!.getOrNull(0)!!.moves)
+                if (forcedMove != null) {
+                    moveSet.add(forcedMove)
+                    return moveSet
+                }
+            }
             pokemon.moveSet.forEach { pokemonMove ->
-                if (request != null) {
+                if (request?.active?.getOrNull(0) != null && request.active!!.getOrNull(0)!!.moves.isNotEmpty()) {
                     request.active?.getOrNull(0)?.moves?.forEach{ requestMove ->
                         if (requestMove.id == pokemonMove.name) {
                             moveSet.add(ActivePokemonMove(
@@ -332,6 +340,34 @@ class StrongBattleAI(skill: Int) : BattleAI {
         return moveSet
     }
 
+    private fun findForcedMove(moves: List<InBattleMove>): ActivePokemonMove? {
+        moves.forEach {
+            when (it.id) {
+                "struggle" -> return ActivePokemonMove(
+                    "struggle",
+                    50.0,
+                    ElementalTypes.NORMAL,
+                    DamageCategories.PHYSICAL,
+                    100.0,
+                    100,
+                    0,
+                    false
+                )
+                "recharge" -> return ActivePokemonMove(
+                    "recharge",
+                    0.0,
+                    ElementalTypes.NORMAL,
+                    DamageCategories.STATUS,
+                    100.0,
+                    100,
+                    0,
+                    false
+                )
+            }
+        }
+        return null
+    }
+
     private fun getStatsBoosts(contextManager: ContextManager): PokemonStatBoosts {
         return PokemonStatBoosts(
             ((contextManager.get(BattleContext.Type.BOOST)?.count { it.id == "acc" }
@@ -358,7 +394,7 @@ class StrongBattleAI(skill: Int) : BattleAI {
     // get all used informations about an active pokemon
     private fun getActivePokemon(battlePokemon: BattlePokemon?, request: ShowdownActionRequest?): ActivePokemon {
         if (battlePokemon != null) {
-            var item = battlePokemon.originalPokemon.heldItem().item.translationKey.split(".").last().trim()
+            var item = battlePokemon.originalPokemon.heldItem().item.translationKey.split(".").last().replace("_","").trim()
             var ability = battlePokemon.originalPokemon.ability.name
             var trapped = false
 
@@ -796,7 +832,7 @@ class StrongBattleAI(skill: Int) : BattleAI {
         val expectedTurnsToPlay = expectedTurnsToPlay(attackerTurnsToLive, selectedIsQuicker(field, attackerSide, defenderSide))
 
         for (move in getEnabledMoves(attackerSide.pokemon.moveSet)) {
-            if ((move.damageCategory == DamageCategories.STATUS && attackerSide.pokemon.item !in choiceItems && !attackerSide.pokemon.volatileStatus.contains("encore")) || move.name in offensiveUtilityMoves) {
+            if ((move.damageCategory == DamageCategories.STATUS || move.name in offensiveUtilityMoves) && attackerSide.pokemon.item !in choiceItems && !attackerSide.pokemon.volatileStatus.contains("encore")) {
                 when (move.name) {
                     "fakeout" -> if (!pokemonHasType(defenderSide.pokemon, ElementalTypes.GHOST) && battleTracker.previousNpcPokemon != attackerSide.pokemon.uuid) return move
 
@@ -2273,6 +2309,8 @@ class StrongBattleAI(skill: Int) : BattleAI {
                 } else return SwitchActionResponse(emptySlotSwitchStrategy(battleState.field, battleState.playerSide, battleState.npcSide))
             }
 
+            activePlayerBattlePokemon?.originalPokemon?.ivs
+
             // we should get to here only if we have a pokemon on each side of the board
             val fightResult = get1v1Result(battleState.field, battleState.playerSide, battleState.npcSide)
             val utilityMove = usableUtilityMove(battleState.field, battleState.npcSide, battleState.playerSide, fightResult.turnsToKillNpc, fightResult.turnsToKillPlayer, fightResult.npcWins, fightResult.playerMostProbableMove, getActivePokemonMoveFromName(battleTracker.previousMoves.npc, battleState.npcSide.pokemon), getActivePokemonMoveFromName(battleTracker.previousMoves.player, battleState.playerSide.pokemon))
@@ -2346,7 +2384,6 @@ class StrongBattleAI(skill: Int) : BattleAI {
 
     // target seems to be for 2v2, right now we don't need it
     private fun chooseMove(move: InBattleMove, activeBattlePokemon: ActiveBattlePokemon): MoveActionResponse {
-        if (move.disabled) return MoveActionResponse("struggle")
         val target = if (move.mustBeUsed()) null else move.target.targetList(activeBattlePokemon)
         if (target == null)
             return MoveActionResponse(move.id)
