@@ -81,3 +81,12 @@ publishing {
         // Add repositories to publish to here.
     }
 }
+
+/*loom {
+    runs {
+        client {
+            // Ajoute ici les arguments pour le lancement du client
+            programArg "-Xmx60G"
+        }
+    }
+}*/
