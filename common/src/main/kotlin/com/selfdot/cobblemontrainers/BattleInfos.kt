@@ -14,10 +14,16 @@ data class Field(
     val trickRoom:Boolean
 )
 
-data class PokemonTransformation(
+data class PokemonFormChange(
     val types: Iterable<ElementalType>,
     val stats: PokemonStats
 )
+
+data class InBattlePokemonFormChange(
+    val form: PokemonFormChange,
+    val permanent: Boolean
+)
+
 data class PokemonStats(
     val hp:Double,
     val attack:Double,
@@ -29,6 +35,7 @@ data class PokemonStats(
 
 data class PokemonStatBoosts(
     val accuracy:Double,
+    val evasion:Double,
     val attack:Double,
     val specialAttack:Double,
     val defense:Double,
@@ -128,10 +135,11 @@ data class BattleTracker(
 data class PokemonTracker(
     var item: String?,
     var ability: String?,
-    var transform: Transform?,
+    var transform: Transform?, // for ditto
     var disguiseBroken: Boolean,
     var isAHero: Boolean,
     var takenHit: Int,
+    var formChange: InBattlePokemonFormChange?, // for any form change other than ditto
 )
 
 data class Transform(
@@ -155,7 +163,9 @@ enum class ResetProperty {
     ABILITY,
     TRANSFORM,
     DISGUISEBROKEN,
-    TAKENHIT
+    TAKENHIT,
+    FORMCHANGE,
+    DETAILCHANGE
 }
 
 enum class SideOwner {

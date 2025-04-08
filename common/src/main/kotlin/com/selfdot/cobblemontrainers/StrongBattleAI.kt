@@ -265,7 +265,7 @@ class StrongBattleAI(skill: Int) : BattleAI {
     private val entryHazards = listOf("spikes", "stealthrock", "stickyweb", "toxicspikes", "stoneaxe", "ceaselessedge")
     private val nonOffensiveEntryHazards = listOf("spikes", "stealthrock", "stickyweb", "toxicspikes")
     private val antiHazardsMoves = listOf("rapidspin", "defog", "tidyup", "courtchange", "mortalspin")
-    private val antiBoostMoves = listOf("slearsmog","haze", "whirlwind", "roar", "dragontail")
+    private val antiBoostMoves = listOf("slearsmog","haze", "whirlwind", "roar", "dragontail", "perishsong")
     private val lowPrioAntiBoostMoves = listOf("whirlwind", "roar", "dragontail")
     private val protectMoves = listOf("detect", "protect", "banefulbunker", "burningbulwark", "kingsshield", "obstruct", "silktrap", "spikyshield")
     private val pivotMoves = listOf("uturn","flipturn", "partingshot", "batonpass", "chillyreception","shedtail", "voltswitch", "teleport")
@@ -370,8 +370,11 @@ class StrongBattleAI(skill: Int) : BattleAI {
 
     private fun getStatsBoosts(contextManager: ContextManager): PokemonStatBoosts {
         return PokemonStatBoosts(
-            ((contextManager.get(BattleContext.Type.BOOST)?.count { it.id == "acc" }
-                ?: 0) - (contextManager.get(BattleContext.Type.UNBOOST)?.count { it.id == "acc" }
+            ((contextManager.get(BattleContext.Type.BOOST)?.count { it.id == "accuracy" }
+                ?: 0) - (contextManager.get(BattleContext.Type.UNBOOST)?.count { it.id == "accuracy" }
+                ?: 0)).toDouble(),
+            ((contextManager.get(BattleContext.Type.BOOST)?.count { it.id == "evasion" }
+                ?: 0) - (contextManager.get(BattleContext.Type.UNBOOST)?.count { it.id == "evasion" }
                 ?: 0)).toDouble(),
             ((contextManager.get(BattleContext.Type.BOOST)?.count { it.id == "atk" }
                 ?: 0) - (contextManager.get(BattleContext.Type.UNBOOST)?.count { it.id == "atk" }
@@ -396,13 +399,20 @@ class StrongBattleAI(skill: Int) : BattleAI {
         if (battlePokemon != null) {
             var item = battlePokemon.originalPokemon.heldItem().item.translationKey.split(".").last().replace("_","").trim()
             var ability = battlePokemon.originalPokemon.ability.name
+            var types = battlePokemon.originalPokemon.types
+            var stats = getPokemonStats(battlePokemon.originalPokemon)
             var trapped = false
 
+            // doesn't handle the particular case where ditto used transform on a pokemon that can change form (like ditto copying Aegislash)
             if (battleTracker.pokemons[battlePokemon.uuid] != null) {
                 val tracker = battleTracker.pokemons[battlePokemon.uuid]!!
+                if (tracker.transform != null) return getTransformedPokemon(battlePokemon, request, tracker.transform!!)
                 if (tracker.item != null) item = tracker.item!!
                 if (tracker.ability != null) ability = tracker.ability!!
-                if (tracker.transform != null) return getTransformedPokemon(battlePokemon, request, tracker.transform!!)
+                if (tracker.formChange != null) {
+                    types = tracker.formChange!!.form.types
+                    stats = tracker.formChange!!.form.stats
+                }
             }
             if (request != null)
                 request.active?.forEach { if (it.trapped) trapped = true }
@@ -411,16 +421,9 @@ class StrongBattleAI(skill: Int) : BattleAI {
                 battlePokemon.originalPokemon.species.name,
                 battlePokemon.originalPokemon.species.weight,
                 battlePokemon.originalPokemon.level,
-                PokemonStats(
-                    battlePokemon.originalPokemon.getStat(Stats.HP).toDouble(),
-                    battlePokemon.originalPokemon.getStat(Stats.ATTACK).toDouble(),
-                    battlePokemon.originalPokemon.getStat(Stats.SPECIAL_ATTACK).toDouble(),
-                    battlePokemon.originalPokemon.getStat(Stats.DEFENCE).toDouble(),
-                    battlePokemon.originalPokemon.getStat(Stats.SPECIAL_DEFENCE).toDouble(),
-                    battlePokemon.originalPokemon.getStat(Stats.SPEED).toDouble(),
-                ),
+                stats,
                 getStatsBoosts(battlePokemon.contextManager),
-                battlePokemon.originalPokemon.types,
+                types,
                 battlePokemon.originalPokemon.currentHealth.toDouble(),
                 ability,
                 item,
@@ -433,14 +436,45 @@ class StrongBattleAI(skill: Int) : BattleAI {
         } else return emptyPokemon()
     }
 
+    private fun getPokemonStats(pokemon: Pokemon): PokemonStats {
+        return PokemonStats(
+            pokemon.getStat(Stats.HP).toDouble(),
+            pokemon.getStat(Stats.ATTACK).toDouble(),
+            pokemon.getStat(Stats.SPECIAL_ATTACK).toDouble(),
+            pokemon.getStat(Stats.DEFENCE).toDouble(),
+            pokemon.getStat(Stats.SPECIAL_DEFENCE).toDouble(),
+            pokemon.getStat(Stats.SPEED).toDouble(),
+        )
+    }
+
     // get all used informations about a pokemon when transformed has been used
     private fun getTransformedPokemon(battlePokemon: BattlePokemon?, request: ShowdownActionRequest?, transformation: Transform): ActivePokemon {
 
         // TODO : other stats changes after transformation won't be handled, need to get them in contextManager and make some additions
         if (battlePokemon != null) {
-            var item = battlePokemon.originalPokemon.heldItem().item.translationKey.split(".").last().trim()
+            var item = battlePokemon.originalPokemon.heldItem().item.translationKey.split(".").last().replace("_","").trim()
             var ability = transformation.pokemon.ability.name
+            var types = transformation.pokemon.types
+            var stats = PokemonStats(
+                battlePokemon.originalPokemon.getStat(Stats.HP).toDouble(),
+                transformation.pokemon.getStat(Stats.ATTACK).toDouble(),
+                transformation.pokemon.getStat(Stats.SPECIAL_ATTACK).toDouble(),
+                transformation.pokemon.getStat(Stats.DEFENCE).toDouble(),
+                transformation.pokemon.getStat(Stats.SPECIAL_DEFENCE).toDouble(),
+                transformation.pokemon.getStat(Stats.SPEED).toDouble(),
+            )
             var trapped = false
+
+            // if ditto is transformed and performed a form change with it's transformation, he also get the hp of the transformation so it won't be correct
+            if (battleTracker.pokemons[battlePokemon.uuid] != null) {
+                val tracker = battleTracker.pokemons[battlePokemon.uuid]!!
+                if (tracker.item != null) item = tracker.item!!
+                if (tracker.ability != null) ability = tracker.ability!!
+                if (tracker.formChange != null) {
+                    types = tracker.formChange!!.form.types
+                    stats = tracker.formChange!!.form.stats
+                }
+            }
 
             if (request != null)
                 request.active?.forEach { if (it.trapped) trapped = true }
@@ -449,19 +483,12 @@ class StrongBattleAI(skill: Int) : BattleAI {
                 transformation.pokemon.species.name,
                 transformation.pokemon.species.weight,
                 battlePokemon.originalPokemon.level,
-                PokemonStats(
-                    battlePokemon.originalPokemon.getStat(Stats.HP).toDouble(),
-                    transformation.pokemon.getStat(Stats.ATTACK).toDouble(),
-                    transformation.pokemon.getStat(Stats.SPECIAL_ATTACK).toDouble(),
-                    transformation.pokemon.getStat(Stats.DEFENCE).toDouble(),
-                    transformation.pokemon.getStat(Stats.SPECIAL_DEFENCE).toDouble(),
-                    transformation.pokemon.getStat(Stats.SPEED).toDouble(),
-                ),
+                stats,
                 transformation.statBoosts,
-                transformation.pokemon.types,
+                types,
                 battlePokemon.originalPokemon.currentHealth.toDouble(), // not handled
-                transformation.pokemon.ability.name,
-                battlePokemon.originalPokemon.heldItem().item.translationKey.split(".").last().trim(),
+                ability,
+                item,
                 battlePokemon.originalPokemon.status?.status?.showdownName,
                 battlePokemon.contextManager.get(BattleContext.Type.VOLATILE)?.map { it.id } ?: emptyList(),
                 getActivePokemonMoveSet(transformation.pokemon, request),
@@ -478,7 +505,7 @@ class StrongBattleAI(skill: Int) : BattleAI {
             0F,
             1,
             PokemonStats(0.0,0.0,0.0,0.0,0.0,0.0),
-            PokemonStatBoosts(0.0,0.0,0.0,0.0,0.0,0.0),
+            PokemonStatBoosts(0.0,0.0,0.0,0.0,0.0,0.0,0.0),
             emptyList(),
             0.0,
             "",
@@ -573,10 +600,11 @@ class StrongBattleAI(skill: Int) : BattleAI {
         lateinit var npcEndTurnDamageHeal: DamageHeal
         lateinit var playerEndTurnDamageHeal: DamageHeal
 
-        lateinit var playerMostProbableMove: ActivePokemonMove
-        lateinit var npcMovesInfo: BattleMovesInfos
+        // we have to initialized this here (calling two more times mostProbableOffensiveMove) in case of a pokemon dying on switch
+        // maybe be it's possible to make those two nullables for this particular case but they're used elsewhere and I'm not sure it would be easy (ET FLEMME)
+        val playerMostProbableMove: ActivePokemonMove = mostProbableOffensiveMove(field, playerSide, npcSide, playerCurrentHp.pokemon, npcCurrentHp.pokemon,!npcIsQuicker,false).usedMove.move
+        val npcMovesInfo: BattleMovesInfos = mostProbableOffensiveMove(field, npcSide, playerSide, npcCurrentHp.pokemon, playerCurrentHp.pokemon,npcIsQuicker,false)
 
-        var firstIteration = true
         var weHaveAWinner = false
 
         var turnsToKillNpc = 0
@@ -648,13 +676,6 @@ class StrongBattleAI(skill: Int) : BattleAI {
             npcMoves = mostProbableOffensiveMove(field, npcSide, playerSide, npcCurrentHp.pokemon, playerCurrentHp.pokemon,npcIsQuicker,false)
             //println("[ATTACK] player do "+playerMoves.usedMove.value.damage+" damages and "+playerMoves.usedMove.value.heal+" heal with move: "+playerMoves.usedMove.move.name)
             //println("[ATTACK] npc do "+npcMoves.usedMove.value.damage+" damages and "+npcMoves.usedMove.value.heal+" heal with move: "+npcMoves.usedMove.move.name)
-
-            // Selecting the next most probable move selected by player for next Real turn
-            if (firstIteration) {
-                playerMostProbableMove = playerMoves.usedMove.move
-                npcMovesInfo = npcMoves
-                firstIteration = false
-            }
 
             // LETS FIGHT !!
             if (selectedAttackFirst(field, npcSide, playerSide, npcMoves.usedMove.move, playerMoves.usedMove.move)) { // NPC ATTACKS FIRST
@@ -1819,8 +1840,8 @@ class StrongBattleAI(skill: Int) : BattleAI {
         else heal
     }
 
-    private fun getCumulatedBoosts(pokemon: ActivePokemon): Double {
-        return pokemon.statBoosts.attack + pokemon.statBoosts.defense + pokemon.statBoosts.speed + pokemon.statBoosts.specialAttack + pokemon.statBoosts.specialDefense
+    private fun getNonOffensiveBoosts(pokemon: ActivePokemon): Double {
+        return pokemon.statBoosts.evasion + pokemon.statBoosts.defense + pokemon.statBoosts.speed + pokemon.statBoosts.specialDefense
     }
 
     private fun canUseStatusMove(field: Field, move: ActivePokemonMove, attacker: ActivePokemon, target: ActivePokemon): Boolean {
@@ -1935,6 +1956,7 @@ class StrongBattleAI(skill: Int) : BattleAI {
         var faintPlayer: String
         var moveName: String
         var actor:String
+        var form:String
 
         val battleLogs = battle.battleLog
         val logLines = battleLogs[battleLogs.size - 2].lines()
@@ -1945,8 +1967,10 @@ class StrongBattleAI(skill: Int) : BattleAI {
         val abilityLines = logLines.filter { it.contains("-ability") }
         val transformLines = logLines.filter { it.contains("-transform") }
         val faintLines = logLines.filter { it.contains("|faint|") }
-        var disguiseBrokenLines = logLines.filter { it.contains(Regex("\\|detailschange\\|.*Mimikyu-Busted")) }
-        var damageTakenLines = logLines.filter { it.contains("-damage") }
+        val disguiseBrokenLines = logLines.filter { it.contains(Regex("\\|detailschange\\|.*Mimikyu-Busted")) }
+        val damageTakenLines = logLines.filter { it.contains("-damage") }
+        val detailsChangeLines = logLines.filter { it.contains("|detailschange|") }
+        val formChangeLines = logLines.filter { it.contains("-formechange") }
 
         battleTracker.previousMoves.npc = null
         battleTracker.previousMoves.player = null
@@ -2007,31 +2031,35 @@ class StrongBattleAI(skill: Int) : BattleAI {
                 seenP2Adamage = true
             }
         }
+
+        detailsChangeLines.forEach {
+            uuid = it.split('|')[2].split(":")[1].trim()
+            form = it.split('|')[3].split(",")[0].replace("-","").lowercase().trim()
+            updateBattleTrackerLine(UUID.fromString(uuid),ResetProperty.DETAILCHANGE, form, battle)
+        }
+
+        formChangeLines.forEach {
+            uuid = it.split('|')[2].split(":")[1].trim()
+            form = it.split('|')[3].replace("-","").lowercase().trim()
+            updateBattleTrackerLine(UUID.fromString(uuid),ResetProperty.FORMCHANGE, form, battle)
+        }
     }
 
     private fun updateBattleTrackerLine(uuid: UUID, property: ResetProperty, value: String, battle: PokemonBattle) {
         if (battleTracker.pokemons[uuid] == null)
-            battleTracker.pokemons[uuid] = PokemonTracker(null, null, null, false, false, 0)
+            battleTracker.pokemons[uuid] = PokemonTracker(null, null, null, false, false, 0, null)
         when (property) {
             ResetProperty.ITEM -> battleTracker.pokemons[uuid]!!.item = value
             ResetProperty.ABILITY -> battleTracker.pokemons[uuid]!!.ability = value
             ResetProperty.TRANSFORM -> {
-                var copiedPokemon: Transform? = null
-                if (battle.side1.activePokemon.get(0).battlePokemon?.uuid == UUID.fromString(value)) {
-                    copiedPokemon = Transform(
-                        battle.side1.activePokemon.get(0).battlePokemon!!.originalPokemon,
-                        getStatsBoosts(battle.side1.activePokemon.get(0).battlePokemon!!.contextManager)
-                    )
-                } else if (battle.side2.activePokemon.get(0).battlePokemon?.uuid == UUID.fromString(value)) {
-                    copiedPokemon = Transform(
-                        battle.side2.activePokemon.get(0).battlePokemon!!.originalPokemon,
-                        getStatsBoosts(battle.side2.activePokemon.get(0).battlePokemon!!.contextManager)
-                    )
-                }
-                battleTracker.pokemons[uuid]!!.transform = copiedPokemon
+                val copiedPokemon = findPokemonInBattle(uuid, battle)
+                if (copiedPokemon != null)
+                    battleTracker.pokemons[uuid]!!.transform = Transform (copiedPokemon.originalPokemon, getStatsBoosts(copiedPokemon.contextManager))
             }
             ResetProperty.DISGUISEBROKEN -> battleTracker.pokemons[uuid]!!.disguiseBroken = true
             ResetProperty.TAKENHIT -> battleTracker.pokemons[uuid]!!.takenHit++
+            ResetProperty.DETAILCHANGE ->  detailsOrFormChange(value, uuid, battle, true)
+            ResetProperty.FORMCHANGE -> detailsOrFormChange(value, uuid, battle, false)
         }
     }
 
@@ -2142,8 +2170,9 @@ class StrongBattleAI(skill: Int) : BattleAI {
             return Switch(npcSide.team.random().uuid, move, false)
         }
 
-        // antiboost security,
-        if (getCumulatedBoosts(playerSide.pokemon) > 0 && !pokemonHasMove(npcSide.pokemon, antiBoostMoves)) {
+        // antiboost security
+        // tried, maybe temporarily, to make anti-boost switch a little less automatic and predictable, need to be tested in fights
+        if (xChanceOn100(70) && getNonOffensiveBoosts(playerSide.pokemon) > 0 && !pokemonHasMove(npcSide.pokemon, antiBoostMoves)) {
             availableSwitches = antiSetupSwitches(field, playerSide, npcSide, fightResult)
             if (availableSwitches.isNotEmpty()) return availableSwitches.random()
         }
@@ -2197,8 +2226,8 @@ class StrongBattleAI(skill: Int) : BattleAI {
 
     // check if one of the trainers switched to reset abilities
     private fun checkPreviousPokemonForReset(playerPokemon: BattlePokemon?, npcPokemon: BattlePokemon?) {
-        if (battleTracker.previousPlayerPokemon != playerPokemon?.uuid) resetTrackerAbility(playerPokemon?.uuid, playerPokemon)
-        if (battleTracker.previousNpcPokemon != npcPokemon?.uuid) resetTrackerAbility(npcPokemon?.uuid, npcPokemon)
+        if (battleTracker.previousPlayerPokemon != playerPokemon?.uuid) resetTrackerStuff(playerPokemon?.uuid)
+        if (battleTracker.previousNpcPokemon != npcPokemon?.uuid) resetTrackerStuff(npcPokemon?.uuid)
     }
 
     private fun updatePreviousPokemon(playerPokemon: ActivePokemon?, npcPokemon: ActivePokemon?){
@@ -2207,9 +2236,12 @@ class StrongBattleAI(skill: Int) : BattleAI {
     }
 
     // use this and rename it if I/You have to reset more stuff in battleTracker when switched out (just need abilities right now)
-    private fun resetTrackerAbility(pokemonUUID: UUID?, pokemonInfo: BattlePokemon?) {
-        if (battleTracker.pokemons[pokemonUUID] != null)
+    private fun resetTrackerStuff(pokemonUUID: UUID?) {
+        if (battleTracker.pokemons[pokemonUUID] != null) {
             battleTracker.pokemons[pokemonUUID]!!.ability = null
+            if (battleTracker.pokemons[pokemonUUID]!!.formChange != null && !battleTracker.pokemons[pokemonUUID]!!.formChange!!.permanent)
+                battleTracker.pokemons[pokemonUUID]!!.formChange = null
+        }
     }
 
     private fun destinyBondWarning(battle1v1State: Battle1v1State): Boolean {
@@ -2287,6 +2319,36 @@ class StrongBattleAI(skill: Int) : BattleAI {
         return false
     }
 
+    private fun findPokemonInBattle(uuid: UUID, battle: PokemonBattle): BattlePokemon? {
+        battle.side1.actors.first().pokemonList.forEach { if (it.uuid == uuid) return it}
+        battle.side2.actors.first().pokemonList.forEach { if (it.uuid == uuid) return it}
+        return null
+    }
+
+    private fun detailsOrFormChange(form: String, uuid: UUID, battle: PokemonBattle, permanent: Boolean) {
+        val foundPokemon = findPokemonInBattle(uuid, battle)?.originalPokemon
+        if (foundPokemon != null) {
+            val pokemonForm: PokemonFormChange? = TransformedStats.getForm(form)
+            if (pokemonForm == null) battleTracker.pokemons[uuid]!!.formChange = null
+            else {
+                val stats: PokemonStats = TransformedStats.getPokemonRealStats(
+                    pokemonForm.stats,
+                    foundPokemon.ivs,
+                    foundPokemon.evs,
+                    foundPokemon.nature,
+                    foundPokemon.level
+                )
+                battleTracker.pokemons[uuid]!!.formChange = InBattlePokemonFormChange(
+                    PokemonFormChange(
+                        pokemonForm.types,
+                        stats
+                    ),
+                    permanent
+                )
+            }
+        }
+    }
+
     override fun choose(activeBattlePokemon: ActiveBattlePokemon, moveset: ShowdownMoveset?, forceSwitch: Boolean): ShowdownActionResponse {
         try {
             // get the current battle and set it as a variable
@@ -2308,8 +2370,6 @@ class StrongBattleAI(skill: Int) : BattleAI {
                     return SwitchActionResponse(forcedSwitch)
                 } else return SwitchActionResponse(emptySlotSwitchStrategy(battleState.field, battleState.playerSide, battleState.npcSide))
             }
-
-            activePlayerBattlePokemon?.originalPokemon?.ivs
 
             // we should get to here only if we have a pokemon on each side of the board
             val fightResult = get1v1Result(battleState.field, battleState.playerSide, battleState.npcSide)
